@@ -1,0 +1,78 @@
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
+[project]
+name = "dbtalk"
+version = "0.1.0"
+description = "MySQL backup/restore and SQLite/MySQL JSONL transfer CLI."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "click>=8.1,<9",
+  "dynaconf>=3.3,<4",
+  "pymysql>=1.1,<2",
+  "python-dotenv>=1.1,<2",
+  "pyyaml>=6.0,<7",
+  "tzdata>=2025.2",
+]
+
+[dependency-groups]
+dev = [
+  "build>=1.2",
+  "mypy>=1.15",
+  "pytest>=8.3",
+  "pytest-asyncio>=1.4,<2",
+  "pytest-cov>=7,<8",
+  "ruff>=0.9",
+  "types-PyMySQL>=1.1.0",
+]
+
+[project.scripts]
+dbtalk = "dbtalk.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-config --strict-markers --cov=dbtalk --cov-report=term-missing:skip-covered"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+  "integration: requires a manually prepared external database or Docker environment",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["dbtalk"]
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 90
+precision = 1
+show_missing = true
+skip_covered = true
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+mypy_path = "src"
+strict = true
+warn_unused_configs = true
+warn_unreachable = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["dynaconf"]
+ignore_missing_imports = true

@@ -1,0 +1,26 @@
+# Defaults. Use .env.<DBTALK_ENVKEY> or DBTALK_* variables for local overrides.
+verbose: false
+
+logging:
+  level: INFO
+  format: "%(levelname)s %(name)s: %(message)s"
+
+mysqldump:
+  host: localhost
+  port: 3306
+  user: ""
+  password: ""
+  database: ""
+  create_database: false
+  drop_database: false
+  output_directory: data
+
+mysqlrestore:
+  host: localhost
+  port: 3306
+  user: ""
+  password: ""
+  database: ""
+
+database:
+  zero_datetime_as_null: true

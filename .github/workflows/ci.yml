@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Verify dependency lock
+        run: uv lock --check
+
+      - name: Install development dependencies
+        run: uv sync --all-groups --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Verify formatting
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy src tests
+
+      - name: Test with branch coverage
+        run: uv run pytest
+
+      - name: Build distributions
+        run: uv build
+
+  container:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build --tag dbtalk:ci .
+
+      - name: Smoke test image entrypoint
+        run: docker run --rm dbtalk:ci --version
