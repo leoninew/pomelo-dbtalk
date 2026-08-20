@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from .dsn import dsn_from_environment, parse_dsn
 from .format import (
     TRANSFER_FORMAT,
     decode_value,
@@ -20,6 +21,7 @@ from .format import (
 from .models import (
     ColumnDefinition,
     DatabaseDriver,
+    DatabaseOperationError,
     DatabaseTransferError,
     ExportOptions,
     ImportOptions,
@@ -37,7 +39,6 @@ from .models import (
     TransferSummary,
     TypedJSONValue,
 )
-from .mysql import export_mysql, import_mysql
 from .schema import (
     compatible_types,
     order_table_blocks,
@@ -45,7 +46,7 @@ from .schema import (
     validate_import_rows,
     validate_target_table,
 )
-from .sqlite import export_sqlite, import_sqlite
+from .sqlalchemy_transfer import export_sqlalchemy, import_sqlalchemy
 
 logger = logging.getLogger("dbtalk")
 
@@ -61,8 +62,7 @@ def export_database(options: ExportOptions) -> TransferSummary:
     )
     try:
         validate_connection(options.connection)
-        exporters = {"sqlite": export_sqlite, "mysql": export_mysql}
-        summary = exporters[options.connection.driver](options)
+        summary = export_sqlalchemy(options)
     except DatabaseTransferError as error:
         logger.error(
             "database export failed driver=%s output=%s error=%s",
@@ -94,8 +94,7 @@ def import_database(options: ImportOptions) -> TransferSummary:
     )
     try:
         validate_connection(options.connection)
-        importers = {"sqlite": import_sqlite, "mysql": import_mysql}
-        summary = importers[options.connection.driver](options)
+        summary = import_sqlalchemy(options)
     except DatabaseTransferError as error:
         logger.error(
             "database import failed driver=%s input=%s mode=%s error=%s",
@@ -118,12 +117,22 @@ def import_database(options: ImportOptions) -> TransferSummary:
 
 
 def validate_connection(connection: TransferConnection) -> None:
-    """Validate the driver-specific CLI connection input before execution."""
+    """Validate canonical DSN input before the SQLAlchemy transfer adapter runs."""
 
-    if connection.driver == "sqlite" and connection.sqlite_path is None:
-        raise DatabaseTransferError("--sqlite-path is required for SQLite")
-    if connection.driver == "mysql" and not connection.mysql_dsn_env:
-        raise DatabaseTransferError("--mysql-dsn-env is required for MySQL")
+    if (connection.dsn is None) == (connection.dsn_env is None):
+        raise DatabaseTransferError("provide exactly one of dsn or dsn_env")
+    try:
+        parsed = (
+            parse_dsn(connection.dsn)
+            if connection.dsn
+            else dsn_from_environment(connection.dsn_env)
+        )
+    except DatabaseOperationError as error:
+        raise DatabaseTransferError(str(error)) from error
+    if parsed.dialect != connection.driver:
+        raise DatabaseTransferError(
+            f"connection DSN dialect {parsed.dialect!r} does not match {connection.driver!r}"
+        )
 
 
 __all__ = [
@@ -131,6 +140,7 @@ __all__ = [
     "ColumnDefinition",
     "DatabaseDriver",
     "DatabaseTransferError",
+    "DatabaseOperationError",
     "ExportOptions",
     "ImportOptions",
     "JSONScalar",

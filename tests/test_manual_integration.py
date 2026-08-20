@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from dbtalk.cli import cli
+from db_talk.cli import cli
 
 
 @pytest.mark.integration

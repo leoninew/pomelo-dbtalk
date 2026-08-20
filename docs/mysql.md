@@ -1,84 +1,72 @@
 # MySQL 手册
 
-`dbtalk mysql` 用于创建 MySQL 原生 SQL dump，以及还原 `.sql` 或 `.sql.gz` 文件。需要在 SQLite 与 MySQL 间做数据级 JSONL 传输时，请使用 [`dbtalk database`](database.md)。
+`db-talk mysql` 用于创建 MySQL 原生 SQL dump，以及还原 `.sql` 或 `.sql.gz` 文件。连接入口与其他
+数据库命令一致：`dump` 和 `restore` 都必须接受且只接受一个 `--dsn DSN` 或 `--dsn-env NAME`。
 
 ```powershell
-uv run dbtalk mysql --help
-uv run dbtalk mysql dump --help
-uv run dbtalk mysql restore --help
+uv run db-talk mysql --help
+uv run db-talk mysql dump --help
+uv run db-talk mysql restore --help
 ```
 
-## 配置
+## DSN
 
-命令从项目根目录的 [`dbtalk.yaml`](../dbtalk.yaml) 读取默认值。设置 `DBTALK_ENVKEY=local` 后，会加载项目根目录的 `.env.local`；其中 `DBTALK_*` 值覆盖 YAML。CLI 选项优先级最高。
+MySQL backup/restore 只接受明确的 `mysql+pymysql://` DSN：
 
-`dump` 和 `restore` 使用独立配置组。应将凭据放入 `.env.local` 或进程环境变量，不要写入命令行或提交到仓库。
+```powershell
+uv run db-talk mysql dump `
+  --dsn 'mysql+pymysql://user:password@host:3306/app' `
+  --output .\data\app.sql
 
-```env
-DBTALK_MYSQLDUMP__HOST=localhost
-DBTALK_MYSQLDUMP__PORT=3306
-DBTALK_MYSQLDUMP__USER=
-DBTALK_MYSQLDUMP__PASSWORD=
-DBTALK_MYSQLDUMP__DATABASE=
-DBTALK_MYSQLDUMP__CREATE_DATABASE=false
-DBTALK_MYSQLDUMP__DROP_DATABASE=false
-DBTALK_MYSQLDUMP__OUTPUT_DIRECTORY=data
-
-DBTALK_MYSQLRESTORE__HOST=localhost
-DBTALK_MYSQLRESTORE__PORT=3306
-DBTALK_MYSQLRESTORE__USER=
-DBTALK_MYSQLRESTORE__PASSWORD=
-DBTALK_MYSQLRESTORE__DATABASE=
+$env:APP_DSN = 'mysql+pymysql://user:password@host:3306/app'
+uv run db-talk mysql restore `
+  --dsn-env APP_DSN `
+  --input .\data\app.sql.gz
 ```
 
-密码通过 `MYSQL_PWD` 传递给 MySQL 客户端，dbtalk 的正常输出不会回显密码。
+`mysql://`、`postgresql://`、`postgres://`、Go 风格 DSN 和 host/user/password/database 分散参数都
+不是 canonical DSN。完整 DSN 可能包含密码；脚本中优先使用 `--dsn-env`。密码只通过 `MYSQL_PWD`
+传递给原生客户端，正常输出不会回显密码。
 
 ## Dump
 
-`dump` 需要 `user`、`password` 和 `database`，可通过配置或同名 CLI 选项提供。
-
 ```powershell
-uv run dbtalk mysql dump --database app --output .\data\app.sql
-uv run dbtalk mysql dump --database app --output .\data\app.sql --archive
-uv run dbtalk mysql dump --database app --create-database --drop-database
+uv run db-talk mysql dump `
+  --dsn 'mysql+pymysql://user:password@host:3306/app' `
+  --output .\data\app.sql `
+  --create-database `
+  --drop-database `
+  --archive
 ```
-
-未指定 `--output` 时，dbtalk 会创建配置中的 `mysqldump.output_directory`（默认 `data/`），并输出 `<database>-<timestamp>.sql`。使用 `--archive` 时输出会 gzip 压缩；路径没有 `.gz` 后缀会自动追加。
-
-显式指定 `--output` 时，只有路径已经是目录才会被当作目录，并在其中生成 `<database>-<timestamp>.sql`。其他路径都被视为文件路径，且父目录必须已经存在；不存在的路径不会被推断为目录或自动创建。
 
 | 选项 | 说明 |
 | --- | --- |
-| `--host`、`--port`、`--user`、`--password`、`--database` | 覆盖对应的 `mysqldump` 配置值。 |
-| `--output FILE_OR_DIRECTORY` | SQL 制品输出文件，或已有的输出目录。 |
-| `--create-database` / `--no-create-database` | 包含或省略 `CREATE DATABASE` 语句。 |
-| `--drop-database` / `--no-drop-database` | 包含或省略 `DROP DATABASE` 语句。 |
-| `--archive` | 写入 gzip 压缩的 dump。 |
+| `--dsn DSN` / `--dsn-env NAME` | 必须二选一的 MySQL DSN。 |
+| `--output FILE_OR_DIRECTORY` | SQL 制品输出文件或已有输出目录。 |
+| `--create-database` / `--no-create-database` | 包含或省略 `CREATE DATABASE`。 |
+| `--drop-database` / `--no-drop-database` | 包含或省略 `DROP DATABASE`。 |
+| `--archive` | 写入 gzip 压缩 dump。 |
 
-生成的 dump 包含存储过程、事件和数据库选择语句。连接非本机 MySQL host 时使用客户端压缩；`localhost` 与 `127.0.0.1` 不使用该参数。
+省略 `--output` 时使用配置中的 `mysqldump.output_directory`（默认 `data/`），生成
+`<database>-<timestamp>.sql`。显式输出目录必须已经存在。
 
 ## Restore
 
-`restore` 需要已有的 `.sql` 或 `.sql.gz` 输入文件，以及 `user` 和 `password`。目标数据库可选：不传 `--database` 时，由 SQL 文件控制数据库选择。目标库必须已经存在，除非 SQL 文件本身创建它。
-
 ```powershell
-uv run dbtalk mysql restore --input .\data\app.sql
-uv run dbtalk mysql restore --database app_local --input .\data\app.sql.gz
+uv run db-talk mysql restore `
+  --dsn 'mysql+pymysql://user:password@host:3306/app' `
+  --input .\data\app.sql.gz
 ```
 
 | 选项 | 说明 |
 | --- | --- |
-| `--host`、`--port`、`--user`、`--password`、`--database` | 覆盖对应的 `mysqlrestore` 配置值。 |
+| `--dsn DSN` / `--dsn-env NAME` | 必须二选一的 MySQL DSN；数据库名来自 DSN。 |
 | `--input FILE` | 必填的 SQL 或 gzip 压缩 SQL 输入文件。 |
 
-传入 `--database` 后，dbtalk 会准备临时输入：跳过顶层 `CREATE DATABASE`、`DROP DATABASE`，并将顶层 `USE` 语句改写为指定目标库。原始 dump 文件不会被修改。
-
-还原可能覆盖或删除现有表及数据。执行前请确认目标连接、目标库、输入来源和写入授权。
+目标数据库必须已经存在，除非 SQL 文件本身创建它。还原可能覆盖或删除现有数据，执行前确认目标
+连接、输入来源和写入授权。
 
 ## 客户端与故障处理
 
-dbtalk 优先使用本机 `mysqldump` 或 `mysql` 可执行文件。缺失时，才使用本机已有的 Docker `mysql` 镜像；不会安装客户端、拉取镜像、创建数据库或自动重试。
-
-Docker 回退连接 `localhost` 或 `127.0.0.1` 时使用 `host.docker.internal`，其他 host 原样传递。Docker 不可用或本机没有 MySQL 镜像时，命令会失败退出。
-
-dump 成功后检查 CLI 报告的输出路径与文件大小；restore 成功后检查退出状态，并按需要抽查目标表。
+`db-talk` 优先使用本机 `mysqldump` 或 `mysql` 可执行文件。缺失时才使用本机已有的 Docker `mysql` 镜像；
+不会安装客户端、拉取镜像、创建数据库或自动重试。

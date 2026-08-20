@@ -7,7 +7,7 @@ from datetime import tzinfo
 from pathlib import Path
 from typing import Literal
 
-DatabaseDriver = Literal["sqlite", "mysql"]
+DatabaseDriver = Literal["sqlite", "mysql", "postgresql"]
 TransferMode = Literal["insert", "upsert"]
 
 JSONScalar = None | bool | int | float | str
@@ -17,6 +17,10 @@ JSONValue = JSONScalar | TypedJSONValue
 
 class DatabaseTransferError(RuntimeError):
     """Raised when a database transfer cannot safely continue."""
+
+
+class DatabaseOperationError(RuntimeError):
+    """Raised when a generic database operation cannot safely continue."""
 
 
 @dataclass(frozen=True)
@@ -88,11 +92,30 @@ class TableSchema:
 
 @dataclass(frozen=True)
 class TransferConnection:
-    """Connection input accepted by the CLI without embedding a password."""
+    """Connection input for transfer, resolved through the canonical DSN boundary."""
 
     driver: DatabaseDriver
-    sqlite_path: Path | None = None
-    mysql_dsn_env: str | None = None
+    dsn: str | None = None
+    dsn_env: str | None = None
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    """Database-independent query result returned by sync and async clients."""
+
+    columns: tuple[str, ...]
+    rows: tuple[tuple[object, ...], ...]
+
+    @property
+    def row_count(self) -> int:
+        return len(self.rows)
+
+
+@dataclass(frozen=True)
+class ExecutionResult:
+    """Database-independent execution result."""
+
+    row_count: int
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import click
 
-from dbtalk.settings import MySQLDumpConfig
+from db_talk.settings import MySQLDumpConfig
 
 from .client import (
     docker_database_host,

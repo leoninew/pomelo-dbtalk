@@ -7,15 +7,16 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from dbtalk.database.transfer import (
+from db_talk.database.dsn import sqlite_dsn
+from db_talk.database.transfer import (
     ExportOptions,
     ImportOptions,
     TransferConnection,
     export_database,
     import_database,
 )
-from dbtalk.logging_config import configure_logging
-from dbtalk.settings import LoggingSettings
+from db_talk.logging_config import configure_logging
+from db_talk.settings import LoggingSettings
 
 
 class DatabaseTransferLoggingTests(unittest.TestCase):
@@ -25,7 +26,7 @@ class DatabaseTransferLoggingTests(unittest.TestCase):
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
 
-        with patch("dbtalk.logging_config.logging.basicConfig") as configure:
+        with patch("db_talk.logging_config.logging.basicConfig") as configure:
             configure_logging(config.level, config.format, verbose=False)
 
         configure.assert_called_once_with(
@@ -44,7 +45,7 @@ class DatabaseTransferLoggingTests(unittest.TestCase):
             with self.assertLogs("dbtalk", level="INFO") as captured:
                 export_database(
                     ExportOptions(
-                        TransferConnection("sqlite", sqlite_path=source),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                         output,
                         ZoneInfo("UTC"),
                     )
@@ -52,8 +53,10 @@ class DatabaseTransferLoggingTests(unittest.TestCase):
 
             messages = "\n".join(captured.output)
             self.assertIn("database export started driver=sqlite", messages)
-            self.assertIn("sqlite export schema loaded", messages)
-            self.assertIn("sqlite export table completed table=items rows=1", messages)
+            self.assertIn("database export connecting sqlite", messages)
+            self.assertIn(
+                "database export table completed dialect=sqlite table=items rows=1", messages
+            )
             self.assertIn("database export completed driver=sqlite", messages)
 
     def test_sqlite_import_logs_document_preflight_table_and_completion(self) -> None:
@@ -66,7 +69,7 @@ class DatabaseTransferLoggingTests(unittest.TestCase):
             self._create_database(target, "target")
             export_database(
                 ExportOptions(
-                    TransferConnection("sqlite", sqlite_path=source),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                     output,
                     ZoneInfo("UTC"),
                 )
@@ -75,7 +78,7 @@ class DatabaseTransferLoggingTests(unittest.TestCase):
             with self.assertLogs("dbtalk", level="INFO") as captured:
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         output,
                         "upsert",
                         ZoneInfo("UTC"),
@@ -84,10 +87,11 @@ class DatabaseTransferLoggingTests(unittest.TestCase):
 
             messages = "\n".join(captured.output)
             self.assertIn("database import started driver=sqlite", messages)
-            self.assertIn("database import document loaded source=sqlite", messages)
-            self.assertIn("sqlite import preflight completed mode=upsert", messages)
-            self.assertIn("sqlite import table completed table=items rows=1", messages)
-            self.assertIn("sqlite import integrity checks passed", messages)
+            self.assertIn("database import connecting sqlite", messages)
+            self.assertIn(
+                "database import table completed dialect=sqlite table=items rows=1 mode=upsert",
+                messages,
+            )
             self.assertIn("database import completed driver=sqlite", messages)
 
     @staticmethod

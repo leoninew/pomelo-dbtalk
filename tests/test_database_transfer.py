@@ -15,14 +15,13 @@ from zoneinfo import ZoneInfo
 
 from click.testing import CliRunner
 
-from dbtalk.cli import cli as main
-from dbtalk.database.mysql import (
-    MysqlDsn,
+from db_talk.cli import cli as main
+from db_talk.database.dsn import sqlite_dsn
+from db_talk.database.mysql import (
     _encode_mysql_value,
     _mysql_time_of_day,
-    load_dsn,
 )
-from dbtalk.database.transfer import (
+from db_talk.database.transfer import (
     ColumnDefinition,
     DatabaseTransferError,
     ExportOptions,
@@ -64,8 +63,8 @@ class DatabaseTransferTests(unittest.TestCase):
                     "export",
                     "--source",
                     "sqlite",
-                    "--sqlite-path",
-                    str(source),
+                    "--dsn",
+                    f"sqlite:///{source.as_posix()}",
                     "--output",
                     "transfer.jsonl",
                     "--archive",
@@ -79,8 +78,8 @@ class DatabaseTransferTests(unittest.TestCase):
                     "import",
                     "--target",
                     "sqlite",
-                    "--sqlite-path",
-                    str(target),
+                    "--dsn",
+                    f"sqlite:///{target.as_posix()}",
                     "--input",
                     str(compressed_output),
                     "--mode",
@@ -131,14 +130,14 @@ class DatabaseTransferTests(unittest.TestCase):
 
             exported = export_database(
                 ExportOptions(
-                    TransferConnection("sqlite", sqlite_path=source),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                     transfer,
                     ZoneInfo("Asia/Shanghai"),
                 )
             )
             imported = import_database(
                 ImportOptions(
-                    TransferConnection("sqlite", sqlite_path=target),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                     transfer,
                     "upsert",
                     ZoneInfo("UTC"),
@@ -190,7 +189,7 @@ class DatabaseTransferTests(unittest.TestCase):
                 connection.close()
             export_database(
                 ExportOptions(
-                    TransferConnection("sqlite", sqlite_path=source),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                     transfer,
                     ZoneInfo("UTC"),
                 )
@@ -199,7 +198,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "parent"):
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         transfer,
                         "insert",
                         ZoneInfo("UTC"),
@@ -233,7 +232,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "no primary key"):
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         transfer,
                         "upsert",
                         ZoneInfo("UTC"),
@@ -262,7 +261,7 @@ class DatabaseTransferTests(unittest.TestCase):
 
             import_database(
                 ImportOptions(
-                    TransferConnection("sqlite", sqlite_path=target),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                     transfer,
                     "insert",
                     ZoneInfo("UTC"),
@@ -288,7 +287,7 @@ class DatabaseTransferTests(unittest.TestCase):
             source_connection.close()
             export_database(
                 ExportOptions(
-                    TransferConnection("sqlite", sqlite_path=source),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                     transfer,
                     ZoneInfo("UTC"),
                 )
@@ -296,7 +295,7 @@ class DatabaseTransferTests(unittest.TestCase):
 
             imported = import_database(
                 ImportOptions(
-                    TransferConnection("sqlite", sqlite_path=target),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                     transfer,
                     "insert",
                     ZoneInfo("UTC"),
@@ -328,7 +327,7 @@ class DatabaseTransferTests(unittest.TestCase):
 
             exported = export_database(
                 ExportOptions(
-                    TransferConnection("sqlite", sqlite_path=source),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                     transfer,
                     ZoneInfo("UTC"),
                     ("child",),
@@ -355,7 +354,7 @@ class DatabaseTransferTests(unittest.TestCase):
 
             summary = export_database(
                 ExportOptions(
-                    TransferConnection("sqlite", sqlite_path=source),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                     transfer,
                     ZoneInfo("UTC"),
                     include_tables=("parent", "child"),
@@ -378,7 +377,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "unselected"):
                 export_database(
                     ExportOptions(
-                        TransferConnection("sqlite", sqlite_path=source),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                         transfer,
                         ZoneInfo("UTC"),
                         include_tables=("child",),
@@ -408,7 +407,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "unselected"):
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         transfer,
                         "insert",
                         ZoneInfo("UTC"),
@@ -429,7 +428,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "source database"):
                 export_database(
                     ExportOptions(
-                        TransferConnection("sqlite", sqlite_path=source),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(source)),
                         transfer,
                         ZoneInfo("UTC"),
                         ("missing",),
@@ -456,7 +455,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "excluded table"):
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         transfer,
                         "insert",
                         ZoneInfo("UTC"),
@@ -492,7 +491,7 @@ class DatabaseTransferTests(unittest.TestCase):
 
             import_database(
                 ImportOptions(
-                    TransferConnection("sqlite", sqlite_path=target),
+                    TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                     transfer,
                     "upsert",
                     ZoneInfo("UTC"),
@@ -540,7 +539,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "does not exist"):
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         transfer,
                         "insert",
                         ZoneInfo("UTC"),
@@ -609,7 +608,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "rejected"):
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         transfer,
                         "insert",
                         ZoneInfo("UTC"),
@@ -641,7 +640,7 @@ class DatabaseTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(DatabaseTransferError, "missing its end"):
                 import_database(
                     ImportOptions(
-                        TransferConnection("sqlite", sqlite_path=target),
+                        TransferConnection("sqlite", dsn=sqlite_dsn(target)),
                         transfer,
                         "insert",
                         ZoneInfo("UTC"),
@@ -690,7 +689,7 @@ class DatabaseTransferTests(unittest.TestCase):
 
     def test_mysql_zero_dates_follow_export_configuration(self) -> None:
         options = ExportOptions(
-            TransferConnection("mysql", mysql_dsn_env="TRANSFER_MYSQL_DSN"),
+            TransferConnection("mysql", dsn="mysql+pymysql://user:pass@db.test:3306/app"),
             Path("transfer.jsonl"),
             ZoneInfo("UTC"),
         )
@@ -704,7 +703,7 @@ class DatabaseTransferTests(unittest.TestCase):
         )
 
         disabled_options = ExportOptions(
-            TransferConnection("mysql", mysql_dsn_env="TRANSFER_MYSQL_DSN"),
+            TransferConnection("mysql", dsn="mysql+pymysql://user:pass@db.test:3306/app"),
             Path("transfer.jsonl"),
             ZoneInfo("UTC"),
             zero_datetime_as_null=False,
@@ -715,7 +714,7 @@ class DatabaseTransferTests(unittest.TestCase):
     def test_cli_passes_zero_date_configuration_to_mysql_export(self) -> None:
         with (
             patch(
-                "dbtalk.database.cli.export_database",
+                "db_talk.database.cli.export_database",
                 return_value=TransferSummary(table_count=0, row_count=0),
             ) as export,
             patch.dict(
@@ -731,8 +730,8 @@ class DatabaseTransferTests(unittest.TestCase):
                     "export",
                     "--source",
                     "mysql",
-                    "--mysql-dsn-env",
-                    "TRANSFER_MYSQL_DSN",
+                    "--dsn",
+                    "mysql+pymysql://user:pass@db.test:3306/app",
                     "--output",
                     "transfer.jsonl",
                 ],
@@ -765,119 +764,31 @@ class DatabaseTransferTests(unittest.TestCase):
         self.assertTrue(compatible_types("UUID", "uuid"))
         self.assertFalse(compatible_types("UUID", "CHAR(36)"))
 
-    def test_mysql_dsn_is_read_from_environment_not_cli(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {"TRANSFER_MYSQL_DSN": ("transfer:secret@tcp(db.test:3307)/app?charset=utf8mb4")},
-            clear=True,
-        ):
-            self.assertEqual(
-                load_dsn("TRANSFER_MYSQL_DSN"),
-                MysqlDsn("db.test", 3307, "transfer", "secret", "app"),
-            )
+    def test_transfer_always_uses_the_sqlalchemy_adapter(self) -> None:
+        options = ExportOptions(
+            TransferConnection("mysql", dsn="mysql+pymysql://user:pass@db.test:3306/app"),
+            Path("transfer.jsonl"),
+            ZoneInfo("UTC"),
+        )
+        with patch(
+            "db_talk.database.transfer.export_sqlalchemy",
+            return_value=TransferSummary(table_count=1, row_count=2),
+        ) as export:
+            self.assertEqual(export_database(options).row_count, 2)
+        export.assert_called_once_with(options)
 
-    def test_mysql_adapter_uses_metadata_and_parameterized_write_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            transfer = Path(directory) / "transfer.jsonl"
-            self._write_transfer(
-                transfer,
-                "users",
-                (
-                    ColumnDefinition("id", "BIGINT"),
-                    ColumnDefinition("name", "VARCHAR(255)"),
-                ),
-                ("id",),
-                ((1, "replacement"),),
-            )
-            insert_connection = _FakeMysqlConnection(exists=False)
-            with (
-                patch.dict(
-                    "os.environ",
-                    {"TRANSFER_MYSQL_DSN": "user:pass@tcp(db.test:3306)/app"},
-                    clear=True,
-                ),
-                patch(
-                    "dbtalk.database.mysql._connect",
-                    return_value=insert_connection,
-                ),
-            ):
-                import_database(
-                    ImportOptions(
-                        TransferConnection("mysql", mysql_dsn_env="TRANSFER_MYSQL_DSN"),
-                        transfer,
-                        "insert",
-                        ZoneInfo("UTC"),
-                    )
-                )
-            self.assertTrue(
-                any("information_schema.COLUMNS" in query for query, _ in insert_connection.calls)
-            )
-            self.assertIn(
-                (
-                    "INSERT INTO `users` (`id`, `name`) VALUES (%s, %s)",
-                    (1, "replacement"),
-                ),
-                insert_connection.calls,
-            )
-
-            upsert_connection = _FakeMysqlConnection(exists=True)
-            with (
-                patch.dict(
-                    "os.environ",
-                    {"TRANSFER_MYSQL_DSN": "mysql://user:pass@db.test/app"},
-                    clear=True,
-                ),
-                patch(
-                    "dbtalk.database.mysql._connect",
-                    return_value=upsert_connection,
-                ),
-            ):
-                import_database(
-                    ImportOptions(
-                        TransferConnection("mysql", mysql_dsn_env="TRANSFER_MYSQL_DSN"),
-                        transfer,
-                        "upsert",
-                        ZoneInfo("UTC"),
-                    )
-                )
-            self.assertIn(
-                ("UPDATE `users` SET `name` = %s WHERE `id` = %s", ("replacement", 1)),
-                upsert_connection.calls,
-            )
-            self.assertFalse(
-                any(query.startswith("INSERT INTO `users`") for query, _ in upsert_connection.calls)
-            )
-
-    def test_mysql_export_uses_a_consistent_read_and_jsonl_format(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "transfer.jsonl"
-            connection = _FakeMysqlConnection(exists=False, rows=[(1, "Ada")])
-            with (
-                patch.dict(
-                    "os.environ",
-                    {"TRANSFER_MYSQL_DSN": "user:pass@tcp(db.test:3306)/app"},
-                    clear=True,
-                ),
-                patch(
-                    "dbtalk.database.mysql._connect",
-                    return_value=connection,
-                ),
-            ):
-                summary = export_database(
-                    ExportOptions(
-                        TransferConnection("mysql", mysql_dsn_env="TRANSFER_MYSQL_DSN"),
-                        output,
-                        ZoneInfo("UTC"),
-                    )
-                )
-
-            self.assertEqual(summary.row_count, 1)
-            self.assertIn(("SET TRANSACTION READ ONLY", None), connection.calls)
-            self.assertIn(("START TRANSACTION WITH CONSISTENT SNAPSHOT", None), connection.calls)
-            self.assertEqual(connection.fetchmany_sizes, [1000, 1000])
-            records = [json.loads(line) for line in output.read_text().splitlines()]
-            self.assertEqual(records[0]["source"], "mysql")
-            self.assertEqual(records[2]["values"], [1, "Ada"])
+        import_options = ImportOptions(
+            options.connection,
+            Path("transfer.jsonl"),
+            "upsert",
+            ZoneInfo("UTC"),
+        )
+        with patch(
+            "db_talk.database.transfer.import_sqlalchemy",
+            return_value=TransferSummary(table_count=1, row_count=2),
+        ) as importer:
+            self.assertEqual(import_database(import_options).row_count, 2)
+        importer.assert_called_once_with(import_options)
 
     def test_cli_hides_mysql_dsn_value_from_errors(self) -> None:
         result = CliRunner().invoke(
@@ -889,13 +800,13 @@ class DatabaseTransferTests(unittest.TestCase):
                 "mysql",
                 "--output",
                 "transfer.jsonl",
-                "--mysql-dsn-env",
+                "--dsn-env",
                 "MISSING_TRANSFER_DSN",
             ],
         )
 
         self.assertNotEqual(result.exit_code, 0)
-        self.assertIn("MySQL DSN environment variable is not set", result.output)
+        self.assertIn("DSN environment variable is not set", result.output)
         self.assertNotIn("MISSING_TRANSFER_DSN", result.output)
         self.assertNotIn("secret", result.output)
 
@@ -923,8 +834,8 @@ class DatabaseTransferTests(unittest.TestCase):
                     "export",
                     "--source",
                     "sqlite",
-                    "--sqlite-path",
-                    str(source),
+                    "--dsn",
+                    f"sqlite:///{source.as_posix()}",
                     "--output",
                     str(transfer),
                 ],
@@ -936,8 +847,8 @@ class DatabaseTransferTests(unittest.TestCase):
                     "import",
                     "--target",
                     "sqlite",
-                    "--sqlite-path",
-                    str(target),
+                    "--dsn",
+                    f"sqlite:///{target.as_posix()}",
                     "--input",
                     str(transfer),
                     "--mode",
@@ -968,7 +879,14 @@ class DatabaseTransferTests(unittest.TestCase):
             with runner.isolated_filesystem():
                 default_export = runner.invoke(
                     main,
-                    ["database", "export", "--source", "sqlite", "--sqlite-path", str(source)],
+                    [
+                        "database",
+                        "export",
+                        "--source",
+                        "sqlite",
+                        "--dsn",
+                        f"sqlite:///{source.as_posix()}",
+                    ],
                 )
                 default_outputs = list((Path.cwd() / "data").glob("sqlite-*.jsonl"))
                 Path("exports").mkdir()
@@ -979,8 +897,8 @@ class DatabaseTransferTests(unittest.TestCase):
                         "export",
                         "--source",
                         "sqlite",
-                        "--sqlite-path",
-                        str(source),
+                        "--dsn",
+                        f"sqlite:///{source.as_posix()}",
                         "--output",
                         "exports",
                     ],

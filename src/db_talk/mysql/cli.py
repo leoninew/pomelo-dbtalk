@@ -4,8 +4,10 @@ from pathlib import Path
 
 import click
 
-from dbtalk.context import dbtalk_context
-from dbtalk.settings import Settings
+from db_talk.context import dbtalk_context
+from db_talk.database.dsn import dsn_from_environment, parse_dsn
+from db_talk.database.models import DatabaseOperationError
+from db_talk.settings import Settings
 
 from .client import mysql_client_args, mysql_connection_args
 from .dump import (
@@ -54,15 +56,8 @@ def mysql() -> None:
 
 
 @mysql.command("dump", context_settings=CONTEXT_SETTINGS)
-@click.option("--host", help="MySQL host. Defaults to mysqldump.host.")
-@click.option(
-    "--port",
-    type=click.IntRange(1, 65535),
-    help="MySQL port. Defaults to mysqldump.port.",
-)
-@click.option("--user", help="MySQL user. Defaults to mysqldump.user.")
-@click.option("--password", help="MySQL password. Defaults to mysqldump.password.")
-@click.option("--database", help="Database to export. Defaults to mysqldump.database.")
+@click.option("--dsn", "dsn_value", help="Complete MySQL SQLAlchemy-style DSN.")
+@click.option("--dsn-env", help="Environment variable containing the MySQL DSN.")
 @click.option(
     "--output",
     type=click.Path(path_type=Path),
@@ -90,11 +85,8 @@ def mysql() -> None:
 @click.pass_context
 def dump_command(  # noqa: PLR0913 - Click passes one argument for each CLI option.
     ctx: click.Context,
-    host: str | None,
-    port: int | None,
-    user: str | None,
-    password: str | None,
-    database: str | None,
+    dsn_value: str | None,
+    dsn_env: str | None,
     output: Path | None,
     create_database: bool | None,
     drop_database: bool | None,
@@ -102,6 +94,7 @@ def dump_command(  # noqa: PLR0913 - Click passes one argument for each CLI opti
 ) -> None:
     """Export a MySQL database."""
     settings = context_settings(ctx)
+    host, port, user, password, database = mysql_connection_from_dsn(dsn_value, dsn_env)
     options = resolve_dump_options(
         settings.mysqldump,
         MysqlDumpOverrides(
@@ -121,21 +114,8 @@ def dump_command(  # noqa: PLR0913 - Click passes one argument for each CLI opti
 
 
 @mysql.command("restore", context_settings=CONTEXT_SETTINGS)
-@click.option("--host", help="MySQL host. Defaults to mysqlrestore.host.")
-@click.option(
-    "--port",
-    type=click.IntRange(1, 65535),
-    help="MySQL port. Defaults to mysqlrestore.port.",
-)
-@click.option("--user", help="MySQL user. Defaults to mysqlrestore.user.")
-@click.option(
-    "--password",
-    help="MySQL password. Defaults to mysqlrestore.password.",
-)
-@click.option(
-    "--database",
-    help="Target database. Defaults to mysqlrestore.database.",
-)
+@click.option("--dsn", "dsn_value", help="Complete MySQL SQLAlchemy-style DSN.")
+@click.option("--dsn-env", help="Environment variable containing the MySQL DSN.")
 @click.option(
     "--input",
     required=True,
@@ -145,15 +125,13 @@ def dump_command(  # noqa: PLR0913 - Click passes one argument for each CLI opti
 @click.pass_context
 def restore_command(  # noqa: PLR0913 - Click passes one argument for each CLI option.
     ctx: click.Context,
-    host: str | None,
-    port: int | None,
-    user: str | None,
-    password: str | None,
-    database: str | None,
+    dsn_value: str | None,
+    dsn_env: str | None,
     input: Path,
 ) -> None:
     """Import a MySQL dump."""
     settings = context_settings(ctx)
+    host, port, user, password, database = mysql_connection_from_dsn(dsn_value, dsn_env)
     options = resolve_restore_options(
         settings.mysqlrestore,
         MysqlRestoreOverrides(
@@ -171,3 +149,25 @@ def restore_command(  # noqa: PLR0913 - Click passes one argument for each CLI o
 
 def context_settings(ctx: click.Context) -> Settings:
     return dbtalk_context(ctx).settings
+
+
+def mysql_connection_from_dsn(
+    dsn: str | None,
+    dsn_env: str | None,
+) -> tuple[str, int, str, str, str]:
+    """Resolve one explicit MySQL DSN into native client connection fields."""
+
+    if (dsn is None) == (dsn_env is None):
+        raise click.UsageError("provide exactly one of --dsn or --dsn-env")
+    try:
+        parsed = parse_dsn(dsn) if dsn is not None else dsn_from_environment(dsn_env)
+    except DatabaseOperationError as error:
+        raise click.UsageError(str(error)) from error
+    if parsed.dialect != "mysql":
+        raise click.UsageError("MySQL dump and restore require a mysql+pymysql DSN")
+    host = parsed.host
+    user = parsed.url.username
+    database = parsed.database
+    if not host or not user or not database:
+        raise click.UsageError("MySQL DSN must include host, user, and database")
+    return host, parsed.port or 3306, user, parsed.url.password or "", database

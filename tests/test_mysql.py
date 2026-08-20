@@ -11,8 +11,8 @@ from unittest.mock import ANY, patch
 import click
 from click.testing import CliRunner
 
-from dbtalk.cli import cli as main_command
-from dbtalk.mysql.cli import (
+from db_talk.cli import cli as main_command
+from db_talk.mysql.cli import (
     MysqlDumpOptions,
     MysqlDumpOverrides,
     MysqlRestoreOptions,
@@ -27,7 +27,7 @@ from dbtalk.mysql.cli import (
     resolve_restore_options,
     restore_database,
 )
-from dbtalk.settings import MySQLDumpConfig, MySQLRestoreConfig
+from db_talk.settings import MySQLDumpConfig, MySQLRestoreConfig
 
 
 class MysqlCommandTests(unittest.TestCase):
@@ -96,11 +96,11 @@ class MysqlCommandTests(unittest.TestCase):
 
         with (
             patch(
-                "dbtalk.mysql.dump.shutil.which",
+                "db_talk.mysql.dump.shutil.which",
                 return_value="/usr/bin/mysqldump",
             ),
             patch(
-                "dbtalk.mysql.dump.run_command",
+                "db_talk.mysql.dump.run_command",
                 return_value=CompletedProcess([], 0, "", ""),
             ) as run,
         ):
@@ -144,16 +144,16 @@ class MysqlCommandTests(unittest.TestCase):
         success = CompletedProcess([], 0, "", "")
 
         with (
-            patch("dbtalk.mysql.dump.shutil.which", return_value=None),
+            patch("db_talk.mysql.dump.shutil.which", return_value=None),
             patch(
-                "dbtalk.mysql.dump.docker_mysql_image",
+                "db_talk.mysql.dump.docker_mysql_image",
                 return_value=("mysql:8.4", ""),
             ),
             patch(
-                "dbtalk.mysql.dump.run_command",
+                "db_talk.mysql.dump.run_command",
                 side_effect=[success, success],
             ) as run,
-            patch("dbtalk.mysql.dump.remove_temporary_container"),
+            patch("db_talk.mysql.dump.remove_temporary_container"),
         ):
             output = dump_database(options)
 
@@ -198,10 +198,10 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch(
-                    "dbtalk.mysql.dump.shutil.which",
+                    "db_talk.mysql.dump.shutil.which",
                     return_value="/usr/bin/mysqldump",
                 ),
-                patch("dbtalk.mysql.dump.run_command", side_effect=write_dump),
+                patch("db_talk.mysql.dump.run_command", side_effect=write_dump),
             ):
                 output = dump_database(options)
 
@@ -215,21 +215,18 @@ class MysqlCommandTests(unittest.TestCase):
         with (
             runner.isolated_filesystem(),
             patch(
-                "dbtalk.mysql.cli.dump_database",
+                "db_talk.mysql.cli.dump_database",
                 side_effect=lambda options: options.output,
             ) as dump,
         ):
+            Path("backups").mkdir()
             result = runner.invoke(
                 main_command,
                 [
                     "mysql",
                     "dump",
-                    "--user",
-                    "backup",
-                    "--password",
-                    "secret",
-                    "--database",
-                    "example",
+                    "--dsn",
+                    "mysql+pymysql://backup:secret@localhost/example",
                 ],
             )
             default_output = dump.call_args.args[0].output
@@ -245,30 +242,29 @@ class MysqlCommandTests(unittest.TestCase):
             r"example-\d{8}-\d{6}\.sql",
         )
 
-    def test_cli_uses_mysqldump_configuration_and_cli_overrides(self) -> None:
+    def test_cli_uses_explicit_dump_dsn(self) -> None:
         runner = CliRunner()
-        environment = {
-            "DBTALK_MYSQLDUMP__HOST": "db.example.test",
-            "DBTALK_MYSQLDUMP__PORT": "3307",
-            "DBTALK_MYSQLDUMP__USER": "configured-user",
-            "DBTALK_MYSQLDUMP__PASSWORD": "configured-password",
-            "DBTALK_MYSQLDUMP__DATABASE": "configured-database",
-            "DBTALK_MYSQLDUMP__CREATE_DATABASE": "true",
-            "DBTALK_MYSQLDUMP__DROP_DATABASE": "false",
-            "DBTALK_MYSQLDUMP__OUTPUT_DIRECTORY": "backups/mysql",
-        }
 
         with (
             runner.isolated_filesystem(),
             patch(
-                "dbtalk.mysql.cli.dump_database",
+                "db_talk.mysql.cli.dump_database",
                 side_effect=lambda options: options.output,
             ) as dump,
         ):
+            Path("backups").mkdir()
             result = runner.invoke(
                 main_command,
-                ["mysql", "dump", "--user", "cli-user", "--drop-database"],
-                env=environment,
+                [
+                    "mysql",
+                    "dump",
+                    "--dsn",
+                    "mysql+pymysql://cli-user:configured-password@db.example.test:3307/configured-database",
+                    "--create-database",
+                    "--drop-database",
+                    "--output",
+                    "backups",
+                ],
             )
             options = dump.call_args.args[0]
 
@@ -279,7 +275,7 @@ class MysqlCommandTests(unittest.TestCase):
             self.assertEqual(options.database, "configured-database")
             self.assertTrue(options.create_database)
             self.assertTrue(options.drop_database)
-            self.assertEqual(options.output.parent, Path.cwd() / "backups" / "mysql")
+            self.assertEqual(options.output.parent, Path.cwd() / "backups")
 
         self.assertEqual(result.exit_code, 0, result.output)
 
@@ -314,7 +310,7 @@ class MysqlCommandTests(unittest.TestCase):
 
         with (
             runner.isolated_filesystem(),
-            patch("dbtalk.mysql.dump.datetime") as mocked_datetime,
+            patch("db_talk.mysql.dump.datetime") as mocked_datetime,
         ):
             Path("exports").mkdir()
             mocked_datetime.now.return_value = datetime(2026, 8, 20, 15, 45, 0)
@@ -344,7 +340,7 @@ class MysqlCommandTests(unittest.TestCase):
         with (
             runner.isolated_filesystem(),
             patch(
-                "dbtalk.mysql.cli.dump_database",
+                "db_talk.mysql.cli.dump_database",
                 side_effect=lambda options: options.output,
             ) as dump,
         ):
@@ -354,12 +350,8 @@ class MysqlCommandTests(unittest.TestCase):
                 [
                     "mysql",
                     "dump",
-                    "--user",
-                    "root",
-                    "--password",
-                    "secret",
-                    "--database",
-                    "example",
+                    "--dsn",
+                    "mysql+pymysql://root:secret@localhost/example",
                     "--output",
                     "exports",
                 ],
@@ -487,9 +479,9 @@ class MysqlCommandTests(unittest.TestCase):
 
         message = "mysqldump is not available. Docker is not installed or is not on PATH."
         with (
-            patch("dbtalk.mysql.dump.shutil.which", return_value=None),
+            patch("db_talk.mysql.dump.shutil.which", return_value=None),
             patch(
-                "dbtalk.mysql.dump.docker_mysql_image",
+                "db_talk.mysql.dump.docker_mysql_image",
                 return_value=(None, "Docker is not installed or is not on PATH."),
             ),
             self.assertRaisesRegex(
@@ -528,11 +520,11 @@ class MysqlCommandTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "dbtalk.mysql.restore.shutil.which",
+                    "db_talk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
                 patch(
-                    "dbtalk.mysql.restore.run_command",
+                    "db_talk.mysql.restore.run_command",
                     return_value=CompletedProcess([], 0, "", ""),
                 ) as run,
             ):
@@ -586,10 +578,10 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch(
-                    "dbtalk.mysql.restore.shutil.which",
+                    "db_talk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
-                patch("dbtalk.mysql.restore.run_command", side_effect=read_dump),
+                patch("db_talk.mysql.restore.run_command", side_effect=read_dump),
             ):
                 restored = restore_database(options)
 
@@ -630,11 +622,11 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch(
-                    "dbtalk.mysql.restore.shutil.which",
+                    "db_talk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
                 patch(
-                    "dbtalk.mysql.restore.run_command",
+                    "db_talk.mysql.restore.run_command",
                     side_effect=capture_input,
                 ),
             ):
@@ -671,16 +663,16 @@ class MysqlCommandTests(unittest.TestCase):
             success = CompletedProcess([], 0, "", "")
 
             with (
-                patch("dbtalk.mysql.restore.shutil.which", return_value=None),
+                patch("db_talk.mysql.restore.shutil.which", return_value=None),
                 patch(
-                    "dbtalk.mysql.restore.docker_mysql_image",
+                    "db_talk.mysql.restore.docker_mysql_image",
                     return_value=("mysql:8.4", ""),
                 ),
                 patch(
-                    "dbtalk.mysql.restore.run_command",
+                    "db_talk.mysql.restore.run_command",
                     return_value=success,
                 ) as run,
-                patch("dbtalk.mysql.restore.remove_temporary_container"),
+                patch("db_talk.mysql.restore.remove_temporary_container"),
             ):
                 restored_input = restore_database(options)
 
@@ -714,9 +706,9 @@ class MysqlCommandTests(unittest.TestCase):
 
             message = "mysql is not available. Docker is not installed or is not on PATH."
             with (
-                patch("dbtalk.mysql.restore.shutil.which", return_value=None),
+                patch("db_talk.mysql.restore.shutil.which", return_value=None),
                 patch(
-                    "dbtalk.mysql.restore.docker_mysql_image",
+                    "db_talk.mysql.restore.docker_mysql_image",
                     return_value=(None, "Docker is not installed or is not on PATH."),
                 ),
                 self.assertRaisesRegex(
@@ -769,20 +761,13 @@ class MysqlCommandTests(unittest.TestCase):
         self.assertEqual(options.database, "configured_database")
         self.assertEqual(options.input, Path("backup.sql"))
 
-    def test_cli_restores_input_with_configured_connection(self) -> None:
+    def test_cli_restores_input_with_explicit_dsn(self) -> None:
         runner = CliRunner()
-        environment = {
-            "DBTALK_MYSQLRESTORE__HOST": "db.example.test",
-            "DBTALK_MYSQLRESTORE__PORT": "3307",
-            "DBTALK_MYSQLRESTORE__USER": "configured-user",
-            "DBTALK_MYSQLRESTORE__PASSWORD": "configured-password",
-            "DBTALK_MYSQLRESTORE__DATABASE": "configured_database",
-        }
 
         with (
             runner.isolated_filesystem(),
             patch(
-                "dbtalk.mysql.cli.restore_database",
+                "db_talk.mysql.cli.restore_database",
                 side_effect=lambda options: options.input.resolve(),
             ) as restore,
         ):
@@ -793,14 +778,11 @@ class MysqlCommandTests(unittest.TestCase):
                 [
                     "mysql",
                     "restore",
-                    "--user",
-                    "cli-user",
-                    "--database",
-                    "cli_database",
+                    "--dsn",
+                    "mysql+pymysql://cli-user:configured-password@db.example.test:3307/cli_database",
                     "--input",
                     "backup.sql",
                 ],
-                env=environment,
             )
             options = restore.call_args.args[0]
             restored_path = input_path.resolve()
@@ -826,10 +808,8 @@ class MysqlCommandTests(unittest.TestCase):
                 [
                     "mysql",
                     "restore",
-                    "--user",
-                    "root",
-                    "--password",
-                    "secret",
+                    "--dsn",
+                    "mysql+pymysql://root:secret@localhost/example",
                     "--input",
                     "missing.sql",
                 ],

@@ -11,17 +11,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import click
-import pymysql
 import pytest
 
-import dbtalk.database.cli as database_cli
-import dbtalk.database.format as transfer_format
-import dbtalk.database.mysql as mysql_transfer
-import dbtalk.database.schema as schema
-import dbtalk.database.sqlite as sqlite_transfer
-import dbtalk.mysql.client as mysql_client
-import dbtalk.settings as dbtalk_settings
-from dbtalk.database.models import (
+import db_talk.database.cli as database_cli
+import db_talk.database.format as transfer_format
+import db_talk.database.mysql as mysql_transfer
+import db_talk.database.schema as schema
+import db_talk.mysql.client as mysql_client
+import db_talk.settings as dbtalk_settings
+from db_talk.database.models import (
     ColumnDefinition,
     DatabaseTransferError,
     TableBlock,
@@ -243,19 +241,19 @@ def test_mysql_client_file_and_command_helpers(tmp_path: Path) -> None:
     assert mysql_client.docker_database_host("localhost") == "host.docker.internal"
     assert mysql_client.docker_database_host("db.example") == "db.example"
     assert mysql_client.docker_host_gateway_args("db.example") == []
-    with patch("dbtalk.mysql.client.platform.system", return_value="Linux"):
+    with patch("db_talk.mysql.client.platform.system", return_value="Linux"):
         assert mysql_client.docker_host_gateway_args("localhost") == [
             "--add-host",
             "host.docker.internal:host-gateway",
         ]
 
     success = subprocess.CompletedProcess([], 0, "", "")
-    with patch("dbtalk.mysql.client.subprocess.run", return_value=success) as run:
+    with patch("db_talk.mysql.client.subprocess.run", return_value=success) as run:
         assert mysql_client.run_command(["mysql"], {"MYSQL_PWD": "secret"}) == success
         assert mysql_client.run_command(["mysql"], input_path=source) == success
     assert run.call_count == 2
     with (
-        patch("dbtalk.mysql.client.subprocess.run", side_effect=OSError("missing")),
+        patch("db_talk.mysql.client.subprocess.run", side_effect=OSError("missing")),
         pytest.raises(click.ClickException, match="Could not run mysql"),
     ):
         mysql_client.run_command(["mysql"])
@@ -269,20 +267,20 @@ def test_mysql_client_file_and_command_helpers(tmp_path: Path) -> None:
 
 
 def test_mysql_client_docker_discovery_and_cleanup() -> None:
-    with patch("dbtalk.mysql.client.shutil.which", return_value=None):
+    with patch("db_talk.mysql.client.shutil.which", return_value=None):
         assert mysql_client.docker_mysql_image() == (
             None,
             "Docker is not installed or is not on PATH.",
         )
     with (
-        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
-        patch("dbtalk.mysql.client.subprocess.run", side_effect=OSError),
+        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
+        patch("db_talk.mysql.client.subprocess.run", side_effect=OSError),
     ):
         assert mysql_client.docker_mysql_image() == (None, "Docker could not be started.")
     with (
-        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
+        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
         patch(
-            "dbtalk.mysql.client.subprocess.run",
+            "db_talk.mysql.client.subprocess.run",
             return_value=subprocess.CompletedProcess([], 1, "", ""),
         ),
     ):
@@ -291,17 +289,17 @@ def test_mysql_client_docker_discovery_and_cleanup() -> None:
             "Docker cannot inspect local images; check that its daemon is running.",
         )
     with (
-        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
+        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
         patch(
-            "dbtalk.mysql.client.subprocess.run",
+            "db_talk.mysql.client.subprocess.run",
             return_value=subprocess.CompletedProcess([], 0, "mysql:8.4\nmysql:latest\n", ""),
         ),
     ):
         assert mysql_client.docker_mysql_image() == ("mysql:latest", "")
     with (
-        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
+        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
         patch(
-            "dbtalk.mysql.client.subprocess.run",
+            "db_talk.mysql.client.subprocess.run",
             return_value=subprocess.CompletedProcess([], 0, "mysql:<none>\npostgres:16\n", ""),
         ),
     ):
@@ -309,7 +307,7 @@ def test_mysql_client_docker_discovery_and_cleanup() -> None:
             None,
             "No local MySQL Docker image is available.",
         )
-    with patch("dbtalk.mysql.client.subprocess.run") as remove:
+    with patch("db_talk.mysql.client.subprocess.run") as remove:
         mysql_client.remove_temporary_container("dbtalk-test", {"MYSQL_PWD": "secret"})
     remove.assert_called_once()
 
@@ -365,18 +363,18 @@ def test_database_cli_option_guards_and_settings_validation() -> None:
     with pytest.raises(click.BadParameter, match="unknown IANA timezone"):
         database_cli.parse_timezone("Not/A_Timezone")
     with pytest.raises(click.UsageError, match="must be sqlite or mysql"):
-        database_cli.connection_from_options("postgres", None, None)
-    with pytest.raises(click.UsageError, match="sqlite-path"):
-        database_cli.connection_from_options("sqlite", None, None)
+        database_cli.connection_from_options("postgres")
+    with pytest.raises(click.UsageError, match="exactly one"):
+        database_cli.connection_from_options("sqlite")
     with pytest.raises(RuntimeError, match="valid source"):
         database_cli.export_command_arguments({})
     with pytest.raises(RuntimeError, match="output path"):
         database_cli.export_command_arguments(_export_options(output="transfer.jsonl"))
     assert database_cli.export_command_arguments(_export_options(output=None)).output_path is None
-    with pytest.raises(RuntimeError, match="valid SQLite"):
-        database_cli.export_command_arguments(_export_options(sqlite_path="source.db"))
-    with pytest.raises(RuntimeError, match="valid MySQL"):
-        database_cli.export_command_arguments(_export_options(mysql_dsn_env=1))
+    with pytest.raises(RuntimeError, match="valid DSN"):
+        database_cli.export_command_arguments(_export_options(dsn_value=1))
+    with pytest.raises(RuntimeError, match="valid DSN variable"):
+        database_cli.export_command_arguments(_export_options(dsn_env=1))
     with pytest.raises(RuntimeError, match="valid timezone"):
         database_cli.export_command_arguments(_export_options(timezone_name=1))
     with pytest.raises(RuntimeError, match="valid included"):
@@ -391,10 +389,10 @@ def test_database_cli_option_guards_and_settings_validation() -> None:
         database_cli.import_command_arguments(_import_options(input_path="transfer.jsonl"))
     with pytest.raises(RuntimeError, match="valid import mode"):
         database_cli.import_command_arguments(_import_options(mode="replace"))
-    with pytest.raises(RuntimeError, match="valid SQLite"):
-        database_cli.import_command_arguments(_import_options(sqlite_path="target.db"))
-    with pytest.raises(RuntimeError, match="valid MySQL"):
-        database_cli.import_command_arguments(_import_options(mysql_dsn_env=1))
+    with pytest.raises(RuntimeError, match="valid DSN"):
+        database_cli.import_command_arguments(_import_options(dsn_value=1))
+    with pytest.raises(RuntimeError, match="valid DSN variable"):
+        database_cli.import_command_arguments(_import_options(dsn_env=1))
     with pytest.raises(RuntimeError, match="valid timezone"):
         database_cli.import_command_arguments(_import_options(timezone_name=1))
     with pytest.raises(RuntimeError, match="valid included"):
@@ -423,7 +421,7 @@ def test_database_export_output_path_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    with patch("dbtalk.database.cli.datetime") as mocked_datetime:
+    with patch("db_talk.database.cli.datetime") as mocked_datetime:
         mocked_datetime.now.return_value = datetime(2026, 8, 20, 15, 45, 0)
         default_output = database_cli.resolve_export_output("sqlite", None, archive=False)
         output_directory = tmp_path / "exports"
@@ -445,54 +443,11 @@ def test_database_export_output_path_resolution(
         )
 
 
-def test_mysql_dsn_and_time_helpers_cover_invalid_boundaries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        "DBTALK_TEST_DSN", "mysql+pymysql://user:pass@db.example:3307/app?charset=latin1"
-    )
-    assert mysql_transfer.load_dsn("DBTALK_TEST_DSN") == mysql_transfer.MysqlDsn(
-        "db.example", 3307, "user", "pass", "app", "latin1"
-    )
-    monkeypatch.setenv("DBTALK_TEST_DSN", "not-a-mysql-dsn")
-    with pytest.raises(DatabaseTransferError, match="must use mysql"):
-        mysql_transfer.load_dsn("DBTALK_TEST_DSN")
-    monkeypatch.setenv("DBTALK_TEST_DSN", "mysql://user:pass@db.example:bad/app")
-    with pytest.raises(DatabaseTransferError, match="port is invalid"):
-        mysql_transfer.load_dsn("DBTALK_TEST_DSN")
-    monkeypatch.setenv("DBTALK_TEST_DSN", "mysql://:pass@db.example/app")
-    with pytest.raises(DatabaseTransferError, match="user name"):
-        mysql_transfer.load_dsn("DBTALK_TEST_DSN")
-    monkeypatch.setenv("DBTALK_TEST_DSN", "mysql://user:pass@db.example/")
-    with pytest.raises(DatabaseTransferError, match="database name"):
-        mysql_transfer.load_dsn("DBTALK_TEST_DSN")
-    monkeypatch.setenv("DBTALK_TEST_DSN", "mysql://user:pass@db.example:0/app")
-    assert mysql_transfer.load_dsn("DBTALK_TEST_DSN").port == 3306
-    with pytest.raises(DatabaseTransferError, match="between 1"):
-        mysql_transfer._validate_dsn(
-            mysql_transfer.MysqlDsn("db.example", 0, "user", "pass", "app")
-        )
-    with pytest.raises(DatabaseTransferError, match="required"):
-        mysql_transfer.load_dsn(None)
-    with (
-        patch(
-            "dbtalk.database.mysql.pymysql.connect",
-            side_effect=pymysql.MySQLError("unavailable"),
-        ),
-        pytest.raises(DatabaseTransferError, match="connection failed"),
-    ):
-        mysql_transfer._connect(mysql_transfer.MysqlDsn("db.example", 3306, "user", "pass", "app"))
+def test_mysql_value_helpers_cover_invalid_boundaries() -> None:
     assert mysql_transfer._mysql_time_of_day(timedelta(hours=1, minutes=2, seconds=3)) == "01:02:03"
     assert mysql_transfer._mysql_time_of_day(timedelta(microseconds=120000)) == "00:00:00.12"
     with pytest.raises(DatabaseTransferError, match="outside"):
         mysql_transfer._mysql_time_of_day(timedelta(days=1))
-    assert mysql_transfer._quote_identifier("a`b") == "`a``b`"
-    with pytest.raises(DatabaseTransferError, match="identifier"):
-        mysql_transfer._quote_identifier("")
-    assert sqlite_transfer._quote_identifier('a"b') == '"a""b"'
-    with pytest.raises(DatabaseTransferError, match="identifier"):
-        sqlite_transfer._quote_identifier("\x00")
-    assert sqlite_transfer._sqlite_value(Decimal("1.20")) == "1.20"
 
 
 def _document() -> TransferDocument:
@@ -519,8 +474,8 @@ def _export_options(**overrides: object) -> dict[str, object]:
     options: dict[str, object] = {
         "source": "sqlite",
         "output": Path("transfer.jsonl"),
-        "sqlite_path": None,
-        "mysql_dsn_env": None,
+        "dsn_value": None,
+        "dsn_env": None,
         "timezone_name": "UTC",
         "include_tables": (),
         "exclude_tables": (),
@@ -535,8 +490,8 @@ def _import_options(**overrides: object) -> dict[str, object]:
         "target": "sqlite",
         "input_path": Path("transfer.jsonl"),
         "mode": "insert",
-        "sqlite_path": None,
-        "mysql_dsn_env": None,
+        "dsn_value": None,
+        "dsn_env": None,
         "timezone_name": "UTC",
         "include_tables": (),
         "exclude_tables": (),

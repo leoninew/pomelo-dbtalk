@@ -5,13 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import click
 
-from dbtalk.context import DbtalkContext
+from db_talk.context import DbtalkContext
 
 from .format import gzip_output_path
+from .operations import (
+    execute_from_dsn,
+    parse_parameters,
+    query_from_dsn,
+    render_query,
+)
 from .transfer import (
     DatabaseDriver,
     DatabaseTransferError,
@@ -35,8 +42,8 @@ class ImportCommandArguments:
     target: DatabaseDriver
     input_path: Path
     mode: TransferMode
-    sqlite_path: Path | None
-    mysql_dsn_env: str | None
+    dsn: str | None
+    dsn_env: str | None
     timezone_name: str
     include_tables: tuple[str, ...]
     exclude_tables: tuple[str, ...]
@@ -48,8 +55,8 @@ class ExportCommandArguments:
 
     source: DatabaseDriver
     output_path: Path | None
-    sqlite_path: Path | None
-    mysql_dsn_env: str | None
+    dsn: str | None
+    dsn_env: str | None
     timezone_name: str
     include_tables: tuple[str, ...]
     exclude_tables: tuple[str, ...]
@@ -64,22 +71,17 @@ def parse_timezone(value: str) -> ZoneInfo:
 
 
 def connection_from_options(
-    driver: str, sqlite_path: Path | None, mysql_dsn_env: str | None
+    driver: str,
+    *,
+    dsn: str | None = None,
+    dsn_env: str | None = None,
 ) -> TransferConnection:
-    if driver == "sqlite":
-        connection = TransferConnection(
-            driver="sqlite",
-            sqlite_path=sqlite_path,
-            mysql_dsn_env=mysql_dsn_env,
-        )
-    elif driver == "mysql":
-        connection = TransferConnection(
-            driver="mysql",
-            sqlite_path=sqlite_path,
-            mysql_dsn_env=mysql_dsn_env,
-        )
-    else:
-        raise click.UsageError("database driver must be sqlite or mysql")
+    if driver not in ("sqlite", "mysql", "postgresql"):
+        raise click.UsageError("database driver must be sqlite or mysql or postgresql")
+    typed_driver = cast(DatabaseDriver, driver)
+    if (dsn is None) == (dsn_env is None):
+        raise click.UsageError("provide exactly one of --dsn or --dsn-env")
+    connection = TransferConnection(driver=typed_driver, dsn=dsn, dsn_env=dsn_env)
     try:
         validate_connection(connection)
     except RuntimeError as error:
@@ -139,18 +141,22 @@ def resolve_export_output(
 
 @click.group("database", context_settings=CONTEXT_SETTINGS)
 def database() -> None:
-    """Transfer SQLite/MySQL table data through JSONL."""
+    """Run generic database operations and transfer table data through JSONL."""
 
 
 @database.command("export", context_settings=CONTEXT_SETTINGS)
-@click.option("--source", type=click.Choice(["sqlite", "mysql"]), required=True)
+@click.option(
+    "--source",
+    type=click.Choice(["sqlite", "mysql", "postgresql"]),
+    required=True,
+)
 @click.option(
     "--output",
     type=click.Path(path_type=Path),
     help="JSONL output file or existing directory. Defaults to data/<source>-<timestamp>.jsonl.",
 )
-@click.option("--sqlite-path", type=click.Path(dir_okay=False, path_type=Path))
-@click.option("--mysql-dsn-env", help="Environment variable containing the MySQL DSN.")
+@click.option("--dsn", "dsn_value", help="Complete SQLAlchemy-style database DSN.")
+@click.option("--dsn-env", help="Environment variable containing a SQLAlchemy-style DSN.")
 @click.option("--tz", "timezone_name", default="UTC", show_default=True)
 @click.option(
     "--include-table",
@@ -177,8 +183,8 @@ def export_command(ctx: click.Context, /, **click_options: object) -> None:
     arguments = export_command_arguments(click_options)
     connection = connection_from_options(
         arguments.source,
-        arguments.sqlite_path,
-        arguments.mysql_dsn_env,
+        dsn=arguments.dsn,
+        dsn_env=arguments.dsn_env,
     )
     try:
         output_path = resolve_export_output(
@@ -209,8 +215,8 @@ def export_command_arguments(options: dict[str, object]) -> ExportCommandArgumen
 
     source = options.get("source")
     output_path = options.get("output")
-    sqlite_path = options.get("sqlite_path")
-    mysql_dsn_env = options.get("mysql_dsn_env")
+    dsn = options.get("dsn_value")
+    dsn_env = options.get("dsn_env")
     timezone_name = options.get("timezone_name")
     include_tables = options.get("include_tables")
     exclude_tables = options.get("exclude_tables")
@@ -219,14 +225,16 @@ def export_command_arguments(options: dict[str, object]) -> ExportCommandArgumen
         driver: DatabaseDriver = "sqlite"
     elif source == "mysql":
         driver = "mysql"
+    elif source == "postgresql":
+        driver = "postgresql"
     else:
         raise RuntimeError("Click did not provide a valid source driver")
     if output_path is not None and not isinstance(output_path, Path):
         raise RuntimeError("Click did not provide an output path")
-    if sqlite_path is not None and not isinstance(sqlite_path, Path):
-        raise RuntimeError("Click did not provide a valid SQLite path")
-    if mysql_dsn_env is not None and not isinstance(mysql_dsn_env, str):
-        raise RuntimeError("Click did not provide a valid MySQL DSN variable")
+    if dsn is not None and not isinstance(dsn, str):
+        raise RuntimeError("Click did not provide a valid DSN")
+    if dsn_env is not None and not isinstance(dsn_env, str):
+        raise RuntimeError("Click did not provide a valid DSN variable")
     if not isinstance(timezone_name, str):
         raise RuntimeError("Click did not provide a valid timezone")
     if not isinstance(include_tables, tuple) or not all(
@@ -242,8 +250,8 @@ def export_command_arguments(options: dict[str, object]) -> ExportCommandArgumen
     return ExportCommandArguments(
         source=driver,
         output_path=output_path,
-        sqlite_path=sqlite_path,
-        mysql_dsn_env=mysql_dsn_env,
+        dsn=dsn,
+        dsn_env=dsn_env,
         timezone_name=timezone_name,
         include_tables=include_tables,
         exclude_tables=exclude_tables,
@@ -252,7 +260,11 @@ def export_command_arguments(options: dict[str, object]) -> ExportCommandArgumen
 
 
 @database.command("import", context_settings=CONTEXT_SETTINGS)
-@click.option("--target", type=click.Choice(["sqlite", "mysql"]), required=True)
+@click.option(
+    "--target",
+    type=click.Choice(["sqlite", "mysql", "postgresql"]),
+    required=True,
+)
 @click.option(
     "--input",
     "input_path",
@@ -260,8 +272,8 @@ def export_command_arguments(options: dict[str, object]) -> ExportCommandArgumen
     required=True,
 )
 @click.option("--mode", type=click.Choice(["insert", "upsert"]), required=True)
-@click.option("--sqlite-path", type=click.Path(dir_okay=False, path_type=Path))
-@click.option("--mysql-dsn-env", help="Environment variable containing the MySQL DSN.")
+@click.option("--dsn", "dsn_value", help="Complete SQLAlchemy-style database DSN.")
+@click.option("--dsn-env", help="Environment variable containing a SQLAlchemy-style DSN.")
 @click.option("--tz", "timezone_name", default="UTC", show_default=True)
 @click.option(
     "--include-table",
@@ -281,8 +293,8 @@ def import_command(**click_options: object) -> None:
     arguments = import_command_arguments(click_options)
     connection = connection_from_options(
         arguments.target,
-        arguments.sqlite_path,
-        arguments.mysql_dsn_env,
+        dsn=arguments.dsn,
+        dsn_env=arguments.dsn_env,
     )
     try:
         summary = import_database(
@@ -308,8 +320,8 @@ def import_command_arguments(options: dict[str, object]) -> ImportCommandArgumen
     target = options.get("target")
     input_path = options.get("input_path")
     mode = options.get("mode")
-    sqlite_path = options.get("sqlite_path")
-    mysql_dsn_env = options.get("mysql_dsn_env")
+    dsn = options.get("dsn_value")
+    dsn_env = options.get("dsn_env")
     timezone_name = options.get("timezone_name")
     include_tables = options.get("include_tables")
     exclude_tables = options.get("exclude_tables")
@@ -317,6 +329,8 @@ def import_command_arguments(options: dict[str, object]) -> ImportCommandArgumen
         driver: DatabaseDriver = "sqlite"
     elif target == "mysql":
         driver = "mysql"
+    elif target == "postgresql":
+        driver = "postgresql"
     else:
         raise RuntimeError("Click did not provide a valid target driver")
     if not isinstance(input_path, Path):
@@ -327,10 +341,10 @@ def import_command_arguments(options: dict[str, object]) -> ImportCommandArgumen
         transfer_mode = "upsert"
     else:
         raise RuntimeError("Click did not provide a valid import mode")
-    if sqlite_path is not None and not isinstance(sqlite_path, Path):
-        raise RuntimeError("Click did not provide a valid SQLite path")
-    if mysql_dsn_env is not None and not isinstance(mysql_dsn_env, str):
-        raise RuntimeError("Click did not provide a valid MySQL DSN variable")
+    if dsn is not None and not isinstance(dsn, str):
+        raise RuntimeError("Click did not provide a valid DSN")
+    if dsn_env is not None and not isinstance(dsn_env, str):
+        raise RuntimeError("Click did not provide a valid DSN variable")
     if not isinstance(timezone_name, str):
         raise RuntimeError("Click did not provide a valid timezone")
     if not isinstance(include_tables, tuple) or not all(
@@ -345,9 +359,81 @@ def import_command_arguments(options: dict[str, object]) -> ImportCommandArgumen
         target=driver,
         input_path=input_path,
         mode=transfer_mode,
-        sqlite_path=sqlite_path,
-        mysql_dsn_env=mysql_dsn_env,
+        dsn=dsn,
+        dsn_env=dsn_env,
         timezone_name=timezone_name,
         include_tables=include_tables,
         exclude_tables=exclude_tables,
     )
+
+
+@database.command("query", context_settings=CONTEXT_SETTINGS)
+@click.option("--dsn", "dsn_value", help="Complete SQLAlchemy-style database DSN.")
+@click.option("--dsn-env", help="Environment variable containing the database DSN.")
+@click.option("--sql", required=True, help="One SQL statement using named bind parameters.")
+@click.option(
+    "--param",
+    "parameters",
+    multiple=True,
+    help="Bind parameter in NAME=JSON_VALUE form. Repeat for multiple parameters.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    show_default=True,
+)
+def query_command(
+    dsn_value: str | None,
+    dsn_env: str | None,
+    sql: str,
+    parameters: tuple[str, ...],
+    output_format: str,
+) -> None:
+    """Run one parameterized SQL query against a DSN."""
+
+    try:
+        result = query_from_dsn(
+            dsn_value,
+            dsn_env,
+            sql,
+            parse_parameters(parameters),
+        )
+        click.echo(render_query(result, output_format))
+    except DatabaseTransferError as error:
+        raise click.ClickException(str(error)) from error
+    except RuntimeError as error:
+        raise click.ClickException(str(error)) from error
+
+
+@database.command("exec", context_settings=CONTEXT_SETTINGS)
+@click.option("--dsn", "dsn_value", help="Complete SQLAlchemy-style database DSN.")
+@click.option("--dsn-env", help="Environment variable containing the database DSN.")
+@click.option("--sql", required=True, help="One SQL statement using named bind parameters.")
+@click.option(
+    "--param",
+    "parameters",
+    multiple=True,
+    help="Bind parameter in NAME=JSON_VALUE form. Repeat for multiple parameters.",
+)
+def exec_command(
+    dsn_value: str | None,
+    dsn_env: str | None,
+    sql: str,
+    parameters: tuple[str, ...],
+) -> None:
+    """Execute one parameterized SQL statement against a DSN."""
+
+    try:
+        result = execute_from_dsn(
+            dsn_value,
+            dsn_env,
+            sql,
+            parse_parameters(parameters),
+        )
+    except DatabaseTransferError as error:
+        raise click.ClickException(str(error)) from error
+    except RuntimeError as error:
+        raise click.ClickException(str(error)) from error
+    click.echo(f"SQL execution completed ({result.row_count} rows affected)")

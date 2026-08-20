@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 
 from click.testing import CliRunner
 
-from dbtalk.cli import cli as main
-from dbtalk.database.transfer import (
+from db_talk.cli import cli as main
+from db_talk.database.transfer import (
     ExportOptions,
     TransferConnection,
     validate_connection,
@@ -26,8 +26,8 @@ class DatabaseTransferContractTests(unittest.TestCase):
         result = CliRunner().invoke(main, ["database", "export", "--help"])
 
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("--sqlite-path", result.output)
-        self.assertIn("--mysql-dsn-env", result.output)
+        self.assertIn("--dsn", result.output)
+        self.assertIn("--dsn-env", result.output)
         self.assertIn("--tz", result.output)
         self.assertIn("--include-table", result.output)
         self.assertIn("--exclude-table", result.output)
@@ -42,15 +42,15 @@ class DatabaseTransferContractTests(unittest.TestCase):
         self.assertIn("--include-table", result.output)
         self.assertIn("--exclude-table", result.output)
 
-    def test_connection_contract_requires_driver_specific_input(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "--sqlite-path"):
+    def test_connection_contract_requires_a_canonical_dsn(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "dsn"):
             validate_connection(TransferConnection(driver="sqlite"))
-        with self.assertRaisesRegex(RuntimeError, "--mysql-dsn-env"):
+        with self.assertRaisesRegex(RuntimeError, "dsn"):
             validate_connection(TransferConnection(driver="mysql"))
 
     def test_export_options_preserve_public_shape(self) -> None:
         options = ExportOptions(
-            connection=TransferConnection(driver="sqlite", sqlite_path=Path("source.db")),
+            connection=TransferConnection(driver="sqlite", dsn="sqlite:///source.db"),
             output=Path("transfer.jsonl"),
             timezone=ZoneInfo("UTC"),
         )

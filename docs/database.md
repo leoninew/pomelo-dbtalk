@@ -1,124 +1,137 @@
-# 数据库传输手册
+# 数据库操作手册
 
-`dbtalk database` 用 JSONL 在既有 SQLite 与 MySQL schema 之间传输表数据。它不会创建数据库、表、索引、视图、触发器、用户、权限或迁移。MySQL 原生 SQL 备份与还原请使用 [`dbtalk mysql`](mysql.md)。
+`db-talk database` 提供通用 SQL `query`/`exec`，并用 JSONL 在既有 SQLite、MySQL 与 PostgreSQL schema
+之间传输表数据。所有连接入口都使用一个明确的 SQLAlchemy 2.x DSN：命令接受二选一的 `--dsn DSN`
+或 `--dsn-env NAME`，Python API 接受 DSN 字符串或环境变量名。不会根据数据库类型猜测 driver。
 
 ```powershell
-uv run dbtalk database --help
-uv run dbtalk database export --help
-uv run dbtalk database import --help
+uv run db-talk database --help
+uv run db-talk database export --help
+uv run db-talk database import --help
+uv run db-talk database query --help
+uv run db-talk database exec --help
 ```
 
-## 连接与制品
+## DSN 约定
 
-使用 `--source` 或 `--target` 选择源端或目标端：
-
-| 驱动 | 必需连接选项 |
-| --- | --- |
-| SQLite | `--sqlite-path PATH` |
-| MySQL | `--mysql-dsn-env NAME` |
-
-对 MySQL，`--mysql-dsn-env` 指向保存 DSN 的环境变量，从而避免将凭据写入命令行和传输制品。支持以下格式：
+支持的 DSN 必须使用以下明确形式：
 
 ```text
-mysql://user:password@host:3306/database
-user:password@tcp(host:3306)/database
+sqlite:///./data/app.db
+sqlite:////absolute/path/app.db
+mysql+pymysql://user:password@host:3306/app
+mysql+asyncmy://user:password@host:3306/app
+postgresql+psycopg://user:password@host:5432/app
 ```
+
+`mysql://`、`postgres://`、`postgresql://`、Go 风格 `user:password@tcp(...)` 和数据库类型专用文件
+参数都不属于 canonical DSN，命令会拒绝。密码可放在环境变量中，避免出现在进程参数中。
+
+## Query / Exec
+
+SQL 使用 SQLAlchemy named bind 参数。参数格式为可重复的 `NAME=JSON_VALUE`，字符串需要使用 JSON
+字符串表示：
 
 ```powershell
-$env:SOURCE_MYSQL_DSN = 'mysql://user:password@host:3306/source_db'
-uv run dbtalk database export --source mysql --mysql-dsn-env SOURCE_MYSQL_DSN --output .\data\source.jsonl
+uv run db-talk database query `
+  --dsn 'sqlite:///./data/app.db' `
+  --sql 'SELECT id, name FROM users WHERE id = :id' `
+  --param id=1 `
+  --format table
+
+$env:APP_DSN = 'sqlite:///./data/app.db'
+uv run db-talk database query `
+  --dsn-env APP_DSN `
+  --sql 'SELECT id, name FROM users WHERE id = :id' `
+  --param id=1 `
+  --format json
+
+uv run db-talk database exec `
+  --dsn-env APP_DSN `
+  --sql 'UPDATE users SET name = :name WHERE id = :id' `
+  --param 'name="Ada"' `
+  --param id=1
 ```
 
-`mysqldump` 与 `mysqlrestore` 配置组不影响本命令。JSONL 制品包含业务数据，应保存至被 Git 忽略的 `data/` 或其他受控目录。
+`query` 默认输出 `table`，也可使用 `--format json`。JSON 输出包含 `columns`、`rows` 和 `row_count`；
+日期时间、Decimal 和 BLOB 会转换为 JSON-safe 值。`exec` 输出影响行数。两条命令只执行一条 SQL，
+`exec` 可能修改或删除数据。
+
+同步 Python API 为 `DatabaseClient`，异步 API 为 `AsyncDatabaseClient`；异步 API 会按 async driver
+建立 SQLAlchemy async engine，不向调用方暴露原生 DBAPI 连接。
 
 ## Export
 
-export 读取选定源 schema，将表元数据和行数据写入一个 JSONL 文件。
+export 读取选定源 schema，将表元数据和行数据写入一个 JSONL 文件：
 
 ```powershell
-uv run dbtalk database export --source sqlite --sqlite-path .\source.db
-
-uv run dbtalk database export `
+uv run db-talk database export `
   --source sqlite `
-  --sqlite-path .\source.db `
+  --dsn 'sqlite:///./source.db' `
   --output .\data\transfer.jsonl `
   --include-table users `
-  --include-table orders `
-  --exclude-table audit_log `
-  --tz Asia/Shanghai
+  --exclude-table audit_log
 
-uv run dbtalk database export `
-  --source mysql `
-  --mysql-dsn-env SOURCE_MYSQL_DSN `
-  --output .\data\transfer.jsonl.gz `
-  --archive
+$env:SOURCE_PG_DSN = 'postgresql+psycopg://user:password@host:5432/source_db'
+uv run db-talk database export `
+  --source postgresql `
+  --dsn-env SOURCE_PG_DSN `
+  --output .\data\transfer.jsonl
 ```
 
 | 选项 | 说明 |
 | --- | --- |
-| `--source sqlite|mysql` | 必填的源驱动。 |
+| `--source sqlite|mysql|postgresql` | 必填，必须与 DSN dialect 一致。 |
+| `--dsn DSN` / `--dsn-env NAME` | 必须二选一。 |
 | `--output FILE_OR_DIRECTORY` | 可选的 JSONL 输出文件，或已有的输出目录。 |
-| `--sqlite-path FILE` | 源端为 SQLite 时必填。 |
-| `--mysql-dsn-env NAME` | 源端为 MySQL 时必填。 |
-| `--tz IANA_NAME` | 解释无时区日期时间的时区，默认 `UTC`。 |
-| `--include-table NAME` | 限定导出的表；可重复指定。 |
-| `--exclude-table NAME` | 排除表；可重复指定，且优先于 include。 |
-| `--archive` | 写入 gzip 压缩 JSONL；路径没有 `.gz` 后缀时自动追加。 |
+| `--tz IANA_NAME` | 无时区日期时间的解释时区，默认 `UTC`。 |
+| `--include-table NAME` | 限定导出的表，可重复指定。 |
+| `--exclude-table NAME` | 排除表，可重复指定。 |
+| `--archive` | 写入 gzip 压缩 JSONL。 |
 
-默认导出全部源表。未知、为空、包含 NUL 的表名，以及最终为空的表集合都会在传输前失败。表按外键父表到子表顺序写入。只选择子表而未选择所需父表，或遇到外键环时会预检失败；工具不会自动补充表或关闭外键检查。
+表按外键父表到子表顺序写入。只选择子表而未选择所需父表，或遇到外键环时会预检失败；工具不会
+自动创建 schema、补充表或关闭外键检查。大表固定按每批 1000 行循环读取，不使用 `fetchall()`。
 
-省略 `--output` 时，dbtalk 创建当前目录的 `data/`，并生成 `<source>-<timestamp>.jsonl`，例如 `sqlite-20260820-153651.jsonl`。传入 `--archive` 时生成 `.jsonl.gz`。显式 `--output` 指向已有目录时，在该目录生成相同的时间戳文件；其他路径一律视为文件路径，父目录必须已经存在。不存在的路径不会被推断为目录或自动创建。
-
-大表导出固定按每批 1000 行循环读取并写入 JSONL 或 JSONL.GZ，不会使用 `fetchall()` 将整表载入内存。
-
-## JSONL 表示
-
-制品包含一个 header 和多个表块。每个表块记录表名、列、声明类型、完整主键、行与行数。BLOB 使用 base64 类型标签，DECIMAL 使用 decimal 类型标签，以便保留 JSON 无法原生表达的类型。
-
-无时区日期时间按 `--tz` 解释，保存到 JSONL 时规范化为 UTC，导入时转换为目标时区。`database.zero_datetime_as_null` 默认 `true`，可在 `dbtalk.yaml` 中配置，也可通过环境变量覆盖：
-
-```env
-DBTALK_DATABASE__ZERO_DATETIME_AS_NULL=false
-```
-
-MySQL JSONL 导出默认将 `DATE`、`DATETIME`、`TIMESTAMP` 列的完整零日期（`0000-00-00` 或 `0000-00-00 00:00:00[.fraction]`）写为 JSON `null`。这是为兼容 MySQL 历史空白日期的有损规范化；不会处理 `VARCHAR` 等文本列或 `TIME` 列。将 `database.zero_datetime_as_null` 设为 `false`，或设置 `DBTALK_DATABASE__ZERO_DATETIME_AS_NULL=false` 后，遇到这类值会使导出失败。
-
-MySQL 的负 `TIME` 值或超过一天的 `TIME` 值无法表示为可移植的 time-of-day 数据；需要保留这些值时请使用 [`dbtalk mysql`](mysql.md)。
-
-为兼容既有数据库，日期时间解析也接受 Go 风格的 `YYYY-MM-DD HH:MM:SS[.fraction] ±HHMM TZ` 存储格式，并将其规范化为 JSONL 的 UTC ISO 8601 字符串。导入 MySQL 时，目标 `DATETIME`/`TIMESTAMP` 声明的小数秒精度决定写入精度；未声明精度时按 MySQL 默认的 0 位小数秒写入。
+省略 `--output` 时创建当前目录的 `data/` 并生成 `<source>-<timestamp>.jsonl`。传入 `--archive` 时
+生成 `.jsonl.gz`。显式 `--output` 指向已有目录时，在该目录生成时间戳文件；其他路径视为文件路径，
+父目录必须已经存在。
 
 ## Import
 
-import 将 JSONL 制品写入既有目标 schema。执行前必须确认目标、制品来源及写入授权。
+import 将 JSONL 制品写入既有目标 schema：
 
 ```powershell
-uv run dbtalk database import `
+uv run db-talk database import `
   --target sqlite `
-  --sqlite-path .\target.db `
+  --dsn 'sqlite:///./target.db' `
   --input .\data\transfer.jsonl `
   --mode upsert
 
-$env:TARGET_MYSQL_DSN = 'mysql://user:password@host:3306/target_db'
-uv run dbtalk database import `
+$env:TARGET_MYSQL_DSN = 'mysql+pymysql://user:password@host:3306/target_db'
+uv run db-talk database import `
   --target mysql `
-  --mysql-dsn-env TARGET_MYSQL_DSN `
+  --dsn-env TARGET_MYSQL_DSN `
   --input .\data\transfer.jsonl.gz `
   --mode insert
 ```
 
 | 选项 | 说明 |
 | --- | --- |
-| `--target sqlite|mysql` | 必填的目标驱动。 |
-| `--input FILE` | 必填的 JSONL 或 gzip 压缩 JSONL 输入文件。 |
+| `--target sqlite|mysql|postgresql` | 必填，必须与 DSN dialect 一致。 |
+| `--dsn DSN` / `--dsn-env NAME` | 必须二选一。 |
+| `--input FILE` | 必填的 JSONL 或 gzip JSONL 输入文件。 |
 | `--mode insert|upsert` | 必填的写入模式。 |
-| `--sqlite-path FILE` | 目标端为 SQLite 时必填。 |
-| `--mysql-dsn-env NAME` | 目标端为 MySQL 时必填。 |
-| `--tz IANA_NAME` | 写入无时区日期时间时使用的时区，默认 `UTC`。 |
-| `--include-table NAME` | 限定导入制品中的表；可重复指定。 |
-| `--exclude-table NAME` | 排除制品中的表；可重复指定，且优先于 include。 |
+| `--tz IANA_NAME` | 写入无时区日期时间时的时区，默认 `UTC`。 |
+| `--include-table NAME` | 限定导入表，可重复指定。 |
+| `--exclude-table NAME` | 排除表，可重复指定。 |
 
-写入前，dbtalk 会扫描整个制品，校验结构、表筛选、既有目标表、源列、兼容列类型、完整主键和外键顺序。`upsert` 要求非空的完整主键：命中行按主键更新，不存在的行插入；不会清空表，也不使用 `REPLACE` 或 `DELETE`。
+写入前会扫描整个制品，校验结构、目标表、列类型、完整主键和外键顺序。`upsert` 命中主键时更新，
+未命中时插入；不会清空表，也不使用 `REPLACE` 或 `DELETE`。每个表块是一个事务，失败表块回滚，
+已提交的前序表块不会自动回滚。SQLite 导入后还会执行完整性和外键检查。
 
-制品会先用于预检，再被重新读取以写入数据；两次读取之间不要替换或截断该文件。每个表块是一个事务：失败表块会回滚，已经提交的先前表块不会自动回滚。SQLite 导入后还会执行完整性和外键检查；两种驱动均不会通过关闭外键检查绕过依赖。
+## JSONL 类型
 
-导入完成后，确认 CLI 报告的表数和行数，并按需要抽查目标数据。
+BLOB 使用 base64 type tag，DECIMAL 使用 decimal type tag。无时区日期时间按 `--tz` 解释并规范化为
+UTC ISO 8601 字符串。MySQL 零日期可由 `database.zero_datetime_as_null` 默认转换为 JSON `null`；
+设为 `false` 时遇到零日期会失败。PostgreSQL 普通表、主键、外键、常见类型和 JSONL transfer 由
+SQLAlchemy Inspector 和对应 dialect 处理。

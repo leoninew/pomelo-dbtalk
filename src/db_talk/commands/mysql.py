@@ -1,5 +1,5 @@
 """MySQL command group adapter."""
 
-from dbtalk.mysql.cli import mysql
+from db_talk.mysql.cli import mysql
 
 __all__ = ["mysql"]

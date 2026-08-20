@@ -3,17 +3,22 @@ requires = ["uv_build>=0.10.9,<0.11.0"]
 build-backend = "uv_build"
 
 [project]
-name = "dbtalk"
+name = "db-talk"
 version = "0.1.0"
 description = "MySQL backup/restore and SQLite/MySQL JSONL transfer CLI."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "SQLAlchemy>=2.0,<3",
+  "aiosqlite>=0.20,<1",
+  "asyncmy>=0.2,<1",
   "click>=8.1,<9",
   "dynaconf>=3.3,<4",
+  "psycopg[binary]>=3.2,<4",
   "pymysql>=1.1,<2",
   "python-dotenv>=1.1,<2",
   "pyyaml>=6.0,<7",
+  "tabulate>=0.9,<1",
   "tzdata>=2025.2",
 ]
 
@@ -26,10 +31,11 @@ dev = [
   "pytest-cov>=7,<8",
   "ruff>=0.9",
   "types-PyMySQL>=1.1.0",
+  "types-tabulate>=0.9",
 ]
 
 [project.scripts]
-dbtalk = "dbtalk.cli:main"
+db-talk = "db_talk.cli:main"
 
 [tool.ruff]
 line-length = 100
@@ -46,7 +52,7 @@ line-ending = "lf"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra --strict-config --strict-markers --cov=dbtalk --cov-report=term-missing:skip-covered"
+addopts = "-ra --strict-config --strict-markers --cov=db_talk --cov-report=term-missing:skip-covered"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
@@ -55,7 +61,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["dbtalk"]
+source = ["db_talk"]
 omit = ["*/__main__.py"]
 
 [tool.coverage.report]

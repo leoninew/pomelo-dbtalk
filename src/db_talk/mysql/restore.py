@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from dbtalk.settings import MySQLRestoreConfig
+from db_talk.settings import MySQLRestoreConfig
 
 from .client import (
     docker_database_host,

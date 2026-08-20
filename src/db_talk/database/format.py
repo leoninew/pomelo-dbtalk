@@ -389,7 +389,7 @@ def format_datetime_for_database(
 
 
 def type_family(declared_type: str) -> str:
-    """Map SQLite/MySQL declarations to portable compatibility families."""
+    """Map SQLite, MySQL and PostgreSQL declarations to portable families."""
 
     normalized = declared_type.upper().strip()
     for family, tokens in _TYPE_FAMILY_RULES:
@@ -404,7 +404,7 @@ def type_family(declared_type: str) -> str:
 
 _TYPE_FAMILY_RULES = (
     ("datetime", ("TIMESTAMP", "DATETIME")),
-    ("blob", ("BLOB", "BINARY")),
+    ("blob", ("BLOB", "BINARY", "BYTEA")),
     ("boolean", ("BOOL",)),
     ("decimal", ("DECIMAL", "NUMERIC", "FIXED")),
     ("integer", ("INT", "SERIAL")),
@@ -506,7 +506,11 @@ def _parse_record(raw_line: str, line_number: int) -> dict[str, object]:
 
 def _parse_header(record: dict[str, object], line_number: int) -> TransferHeader:
     source = record.get("source")
-    if record.get("format") != TRANSFER_FORMAT or source not in ("sqlite", "mysql"):
+    if record.get("format") != TRANSFER_FORMAT or source not in (
+        "sqlite",
+        "mysql",
+        "postgresql",
+    ):
         raise DatabaseTransferError(f"JSONL header at line {line_number} is invalid")
     return TransferHeader(format=TRANSFER_FORMAT, source=source)
 
@@ -822,7 +826,11 @@ def _parse_time(value: str) -> time:
 
 
 def _validate_header(header: TransferHeader) -> None:
-    if header.format != TRANSFER_FORMAT or header.source not in ("sqlite", "mysql"):
+    if header.format != TRANSFER_FORMAT or header.source not in (
+        "sqlite",
+        "mysql",
+        "postgresql",
+    ):
         raise DatabaseTransferError("transfer header is invalid")
 
 
