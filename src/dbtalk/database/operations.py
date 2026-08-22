@@ -11,6 +11,8 @@ from typing import Any
 
 from tabulate import tabulate
 
+from dbtalk.settings import DEFAULT_OPERATION_TIMEOUT_SECONDS
+
 from .connection import DatabaseClient
 from .dsn import ParsedDsn, dsn_from_environment, parse_dsn
 from .models import DatabaseOperationError, ExecutionResult, QueryResult
@@ -39,8 +41,16 @@ def query_from_environment(
     environment_name: str,
     statement: str,
     parameters: Mapping[str, object] | None = None,
+    *,
+    timeout_seconds: int = DEFAULT_OPERATION_TIMEOUT_SECONDS,
 ) -> QueryResult:
-    return query_from_dsn(None, environment_name, statement, parameters)
+    return query_from_dsn(
+        None,
+        environment_name,
+        statement,
+        parameters,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def query_from_dsn(
@@ -48,9 +58,11 @@ def query_from_dsn(
     environment_name: str | None,
     statement: str,
     parameters: Mapping[str, object] | None = None,
+    *,
+    timeout_seconds: int = DEFAULT_OPERATION_TIMEOUT_SECONDS,
 ) -> QueryResult:
     parsed = _resolve_operation_dsn(dsn, environment_name)
-    with DatabaseClient(parsed) as client:
+    with DatabaseClient(parsed, timeout_seconds=timeout_seconds) as client:
         return client.query(statement, parameters)
 
 
@@ -58,8 +70,18 @@ def execute_from_environment(
     environment_name: str,
     statement: str,
     parameters: Mapping[str, object] | None = None,
+    *,
+    timeout_seconds: int = DEFAULT_OPERATION_TIMEOUT_SECONDS,
+    allow_write: bool = True,
 ) -> ExecutionResult:
-    return execute_from_dsn(None, environment_name, statement, parameters)
+    return execute_from_dsn(
+        None,
+        environment_name,
+        statement,
+        parameters,
+        timeout_seconds=timeout_seconds,
+        allow_write=allow_write,
+    )
 
 
 def execute_from_dsn(
@@ -67,10 +89,13 @@ def execute_from_dsn(
     environment_name: str | None,
     statement: str,
     parameters: Mapping[str, object] | None = None,
+    *,
+    timeout_seconds: int = DEFAULT_OPERATION_TIMEOUT_SECONDS,
+    allow_write: bool = True,
 ) -> ExecutionResult:
     parsed = _resolve_operation_dsn(dsn, environment_name)
-    with DatabaseClient(parsed) as client:
-        return client.execute(statement, parameters)
+    with DatabaseClient(parsed, timeout_seconds=timeout_seconds) as client:
+        return client.execute(statement, parameters, read_only=not allow_write)
 
 
 def _resolve_operation_dsn(dsn: str | None, environment_name: str | None) -> ParsedDsn:
@@ -134,6 +159,7 @@ def json_default(value: object) -> Any:
 
 
 __all__ = [
+    "DEFAULT_OPERATION_TIMEOUT_SECONDS",
     "execute_from_dsn",
     "execute_from_environment",
     "json_default",

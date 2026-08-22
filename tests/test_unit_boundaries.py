@@ -366,6 +366,14 @@ def test_database_cli_option_guards_and_settings_validation() -> None:
         database_cli.connection_from_options("postgres")
     with pytest.raises(click.UsageError, match="exactly one"):
         database_cli.connection_from_options("sqlite")
+    assert (
+        database_cli.operation_timeout_from_context(click.Context(click.Command("dbtalk")), None)
+        == dbtalk_settings.DEFAULT_OPERATION_TIMEOUT_SECONDS
+    )
+    assert (
+        database_cli.operation_timeout_from_context(click.Context(click.Command("dbtalk")), 15)
+        == 15
+    )
     with pytest.raises(RuntimeError, match="valid source"):
         database_cli.export_command_arguments({})
     with pytest.raises(RuntimeError, match="output path"):
@@ -405,6 +413,8 @@ def test_database_cli_option_guards_and_settings_validation() -> None:
     assert not dbtalk_settings.bool_config("off")
     assert dbtalk_settings.int_config("3307") == 3307
     assert dbtalk_settings.mapping_config(None) == {}
+    with pytest.raises(ValueError, match="database.operation_timeout_seconds"):
+        dbtalk_settings.load_database_transfer_config({"operation_timeout_seconds": 0})
     with pytest.raises(ValueError, match="mysqldump.host"):
         dbtalk_settings.load_mysql_dump_config({"host": ""})
     with pytest.raises(ValueError, match="mysqldump.port"):

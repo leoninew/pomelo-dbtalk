@@ -30,7 +30,8 @@ postgresql+psycopg://user:password@host:5432/app
 ## Query / Exec
 
 SQL 使用 SQLAlchemy named bind 参数。参数格式为可重复的 `NAME=JSON_VALUE`，字符串需要使用 JSON
-字符串表示：
+字符串表示。两个命令都有 `--timeout` / `-t`，单位为秒，只接受正整数。省略时使用配置中的
+`database.operation_timeout_seconds`（默认 `30`）。超时仅针对当前单条语句。
 
 ```powershell
 uv run dbtalk database query `
@@ -47,6 +48,7 @@ uv run dbtalk database query `
   --format json
 
 uv run dbtalk database exec `
+  --write `
   --dsn-env APP_DSN `
   --sql 'UPDATE users SET name = :name WHERE id = :id' `
   --param 'name="Ada"' `
@@ -54,8 +56,26 @@ uv run dbtalk database exec `
 ```
 
 `query` 默认输出 `table`，也可使用 `--format json`。JSON 输出包含 `columns`、`rows` 和 `row_count`；
-日期时间、Decimal 和 BLOB 会转换为 JSON-safe 值。`exec` 输出影响行数。两条命令只执行一条 SQL，
-`exec` 可能修改或删除数据。
+日期时间、Decimal 和 BLOB 会转换为 JSON-safe 值。`query` 会开启数据库的只读会话；它不分析 SQL
+文本，因此写入、DDL 或其他被数据库认定为写入的语句会由数据库拒绝。`exec` 默认同样使用只读会话；
+传入 `--write` / `-w` 后才切换为写会话。它不识别 DML，实际写入授权由数据库会话保证，并输出影响行数。
+两条命令都只执行一条 SQL。
+
+超时使用数据库或驱动的原生能力：SQLite 使用 progress handler 和 `busy_timeout`，PostgreSQL 使用
+事务本地 `statement_timeout`，MySQL 使用 `max_execution_time`，并配置 PyMySQL 读写 socket 超时。
+MySQL 对超时的写语句会中断当前连接；事务型表会由数据库回滚未提交事务，但非事务性语句和带隐式提交的
+DDL 仍遵循 MySQL 原生语义，不能承诺完整回滚。
+
+默认超时配置位于 `dbtalk.yaml`，可由环境变量覆盖：
+
+```yaml
+database:
+  operation_timeout_seconds: 30
+```
+
+```powershell
+$env:DBTALK_DATABASE__OPERATION_TIMEOUT_SECONDS = '15'
+```
 
 同步 Python API 为 `DatabaseClient`，异步 API 为 `AsyncDatabaseClient`；异步 API 会按 async driver
 建立 SQLAlchemy async engine，不向调用方暴露原生 DBAPI 连接。

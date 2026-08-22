@@ -30,6 +30,7 @@ mysqlrestore:
   database: ""
 database:
   zero_datetime_as_null: true
+  operation_timeout_seconds: 30
 """
 
 
@@ -58,6 +59,7 @@ def test_loads_yaml_settings(tmp_path: Path) -> None:
     assert settings.mysqldump.port == 3306
     assert settings.mysqlrestore.database == ""
     assert settings.database.zero_datetime_as_null is True
+    assert settings.database.operation_timeout_seconds == 30
     assert settings.logging.level == "INFO"
     assert settings.logging.format == "%(levelname)s %(name)s: %(message)s"
 
@@ -87,6 +89,17 @@ def test_os_environment_overrides_dotenv(tmp_path: Path, monkeypatch: MonkeyPatc
     settings = load_settings(tmp_path)
 
     assert settings.mysqldump.host == "os.example.test"
+
+
+def test_database_operation_timeout_can_be_overridden(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    write_settings(tmp_path)
+    monkeypatch.setenv("DBTALK_DATABASE__OPERATION_TIMEOUT_SECONDS", "15")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.database.operation_timeout_seconds == 15
 
 
 def write_settings(path: Path) -> None:

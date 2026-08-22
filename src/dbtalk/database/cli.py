@@ -11,14 +11,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import click
 
 from dbtalk.context import DbtalkContext
+from dbtalk.settings import DEFAULT_OPERATION_TIMEOUT_SECONDS
 
 from .format import gzip_output_path
-from .operations import (
-    execute_from_dsn,
-    parse_parameters,
-    query_from_dsn,
-    render_query,
-)
+from .operations import execute_from_dsn, parse_parameters, query_from_dsn, render_query
 from .transfer import (
     DatabaseDriver,
     DatabaseTransferError,
@@ -96,6 +92,20 @@ def zero_datetime_as_null_from_context(ctx: click.Context) -> bool:
     if not isinstance(root_object, DbtalkContext):
         return True
     return root_object.settings.database.zero_datetime_as_null
+
+
+def operation_timeout_from_context(
+    ctx: click.Context,
+    requested_timeout_seconds: int | None,
+) -> int:
+    """Use an explicit CLI timeout or the centralized database default."""
+
+    if requested_timeout_seconds is not None:
+        return requested_timeout_seconds
+    root_object = ctx.find_root().obj
+    if not isinstance(root_object, DbtalkContext):
+        return DEFAULT_OPERATION_TIMEOUT_SECONDS
+    return root_object.settings.database.operation_timeout_seconds
 
 
 def default_export_output(
@@ -372,6 +382,14 @@ def import_command_arguments(options: dict[str, object]) -> ImportCommandArgumen
 @click.option("--dsn-env", help="Environment variable containing the database DSN.")
 @click.option("--sql", required=True, help="One SQL statement using named bind parameters.")
 @click.option(
+    "--timeout",
+    "timeout_seconds",
+    "-t",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Maximum statement time in seconds. Defaults to database.operation_timeout_seconds.",
+)
+@click.option(
     "--param",
     "parameters",
     multiple=True,
@@ -384,10 +402,13 @@ def import_command_arguments(options: dict[str, object]) -> ImportCommandArgumen
     default="table",
     show_default=True,
 )
+@click.pass_context
 def query_command(
+    ctx: click.Context,
     dsn_value: str | None,
     dsn_env: str | None,
     sql: str,
+    timeout_seconds: int | None,
     parameters: tuple[str, ...],
     output_format: str,
 ) -> None:
@@ -399,6 +420,7 @@ def query_command(
             dsn_env,
             sql,
             parse_parameters(parameters),
+            timeout_seconds=operation_timeout_from_context(ctx, timeout_seconds),
         )
         click.echo(render_query(result, output_format))
     except DatabaseTransferError as error:
@@ -412,15 +434,34 @@ def query_command(
 @click.option("--dsn-env", help="Environment variable containing the database DSN.")
 @click.option("--sql", required=True, help="One SQL statement using named bind parameters.")
 @click.option(
+    "--timeout",
+    "timeout_seconds",
+    "-t",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Maximum statement time in seconds. Defaults to database.operation_timeout_seconds.",
+)
+@click.option(
+    "--write",
+    "write_enabled",
+    "-w",
+    is_flag=True,
+    help="Run exec in write-capable mode. Without it, exec uses a read-only session.",
+)
+@click.option(
     "--param",
     "parameters",
     multiple=True,
     help="Bind parameter in NAME=JSON_VALUE form. Repeat for multiple parameters.",
 )
+@click.pass_context
 def exec_command(
+    ctx: click.Context,
     dsn_value: str | None,
     dsn_env: str | None,
     sql: str,
+    timeout_seconds: int | None,
+    write_enabled: bool,
     parameters: tuple[str, ...],
 ) -> None:
     """Execute one parameterized SQL statement against a DSN."""
@@ -431,6 +472,8 @@ def exec_command(
             dsn_env,
             sql,
             parse_parameters(parameters),
+            timeout_seconds=operation_timeout_from_context(ctx, timeout_seconds),
+            allow_write=write_enabled,
         )
     except DatabaseTransferError as error:
         raise click.ClickException(str(error)) from error

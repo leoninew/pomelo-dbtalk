@@ -11,6 +11,7 @@ from typing import Any
 from dynaconf import Dynaconf
 
 DEFAULT_MYSQL_PORT = 3306
+DEFAULT_OPERATION_TIMEOUT_SECONDS = 30
 ENV_PREFIX = "DBTALK"
 ENV_SELECTOR = f"{ENV_PREFIX}_ENVKEY"
 
@@ -45,6 +46,7 @@ class MySQLRestoreConfig:
 @dataclass(frozen=True)
 class DatabaseTransferConfig:
     zero_datetime_as_null: bool
+    operation_timeout_seconds: int
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,12 @@ def load_mysql_restore_config(value: Any) -> MySQLRestoreConfig:
 
 def load_database_transfer_config(value: Any) -> DatabaseTransferConfig:
     config = mapping_config(value)
+    timeout_seconds = int_config(
+        config.get("operation_timeout_seconds", DEFAULT_OPERATION_TIMEOUT_SECONDS)
+    )
+    if timeout_seconds <= 0:
+        raise ValueError("database.operation_timeout_seconds must be greater than zero")
     return DatabaseTransferConfig(
-        zero_datetime_as_null=bool_config(config.get("zero_datetime_as_null", True))
+        zero_datetime_as_null=bool_config(config.get("zero_datetime_as_null", True)),
+        operation_timeout_seconds=timeout_seconds,
     )

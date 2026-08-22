@@ -24,3 +24,4 @@ mysqlrestore:
 
 database:
   zero_datetime_as_null: true
+  operation_timeout_seconds: 30

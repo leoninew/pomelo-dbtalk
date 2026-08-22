@@ -52,7 +52,9 @@ dbtalk database query \
   --format table|json
 
 dbtalk database exec \
+  --write \
   --dsn-env APP_DSN \
+  --timeout 30 \
   --sql "UPDATE users SET name = :name WHERE id = :id" \
   --param name='"Ada"' \
   --param id=1
@@ -65,7 +67,8 @@ dbtalk database exec \
 - `table` 使用 `tabulate` 输出，NULL 显示为 `NULL`，无结果保留列头并报告 0 行。
 - `json` 输出稳定 envelope：`columns`、`rows`、`row_count`；日期时间、Decimal、bytes 等值通过
   统一 JSON-safe 编码输出。
-- `exec` 成功输出影响行数；失败返回非零状态，错误信息不包含 DSN 或参数值。
+- `exec` 默认使用只读会话；传入 `--write` / `-w` 后切换为写会话。成功输出影响行数；失败返回非零状态，错误信息不包含 DSN 或参数值。
+- `query` 和 `exec` 都支持 `--timeout` / `-t`，省略时读取 `database.operation_timeout_seconds`（默认 30），只接受正整数，并限制单条 SQL 语句的执行时间。
 - CLI 使用同步 engine；异步能力只通过 Python API 暴露，不增加 `--async` 开关。
 
 ### Existing transfer commands

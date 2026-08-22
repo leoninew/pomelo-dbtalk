@@ -524,6 +524,7 @@ def test_query_and_exec_cli_use_dsn_environment(
         [
             "database",
             "exec",
+            "--write",
             "--dsn-env",
             "DBTALK_QUERY_DSN",
             "--sql",
@@ -536,6 +537,103 @@ def test_query_and_exec_cli_use_dsn_environment(
     )
     assert execution.exit_code == 0, execution.output
     assert "1 rows affected" in execution.output
+
+
+def test_query_and_exec_cli_require_explicit_write_and_support_timeouts(tmp_path: Path) -> None:
+    path = tmp_path / "safeguards.db"
+    create_database(path)
+    dsn = f"sqlite:///{path.as_posix()}"
+    runner = CliRunner()
+
+    missing_write = runner.invoke(
+        cli,
+        [
+            "database",
+            "exec",
+            "--dsn",
+            dsn,
+            "--sql",
+            "UPDATE users SET name = 'Grace' WHERE id = 1",
+        ],
+    )
+    assert missing_write.exit_code != 0
+    assert "database execution failed" in missing_write.output
+
+    read_only_exec = runner.invoke(
+        cli,
+        [
+            "database",
+            "exec",
+            "--dsn",
+            dsn,
+            "--sql",
+            "SELECT name FROM users WHERE id = 1",
+        ],
+    )
+    assert read_only_exec.exit_code == 0, read_only_exec.output
+
+    query_write = runner.invoke(
+        cli,
+        [
+            "database",
+            "query",
+            "--dsn",
+            dsn,
+            "--timeout",
+            "1",
+            "--sql",
+            "UPDATE users SET name = 'Grace' WHERE id = 1",
+        ],
+    )
+    assert query_write.exit_code != 0
+    assert "database query failed" in query_write.output
+
+    execution = runner.invoke(
+        cli,
+        [
+            "database",
+            "exec",
+            "-w",
+            "--dsn",
+            dsn,
+            "--timeout",
+            "1",
+            "--sql",
+            "UPDATE users SET name = 'Grace' WHERE id = 1",
+        ],
+    )
+    assert execution.exit_code == 0, execution.output
+    assert "1 rows affected" in execution.output
+
+    invalid_timeout = runner.invoke(
+        cli,
+        [
+            "database",
+            "query",
+            "--dsn",
+            dsn,
+            "--timeout",
+            "0",
+            "--sql",
+            "SELECT 1",
+        ],
+    )
+    assert invalid_timeout.exit_code != 0
+    assert "x>=1" in invalid_timeout.output
+
+
+def test_sqlite_statement_timeout_interrupts_query_and_cleans_up(tmp_path: Path) -> None:
+    path = tmp_path / "timeout.db"
+    create_database(path)
+    slow_query = (
+        "WITH RECURSIVE sequence(value) AS (VALUES(1) UNION ALL "
+        "SELECT value + 1 FROM sequence WHERE value < 100000000) "
+        "SELECT sum(value) FROM sequence"
+    )
+    with DatabaseClient(f"sqlite:///{path.as_posix()}", timeout_seconds=0.01) as client:
+        with pytest.raises(DatabaseOperationError, match="query timed out"):
+            client.query(slow_query)
+        assert client.query("SELECT name FROM users WHERE id = 1").rows == (("Ada",),)
 
 
 def test_async_client_does_not_block_event_loop(tmp_path: Path) -> None:
