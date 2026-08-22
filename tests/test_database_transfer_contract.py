@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 
 from click.testing import CliRunner
 
-from db_talk.cli import cli as main
-from db_talk.database.transfer import (
+from dbtalk.cli import cli as main
+from dbtalk.database.transfer import (
     ExportOptions,
     TransferConnection,
     validate_connection,

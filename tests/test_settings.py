@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pytest import MonkeyPatch
 
-from db_talk.settings import load_settings
+from dbtalk.settings import load_settings
 
 DEFAULT_SETTINGS = """verbose: false
 logging:
@@ -90,7 +90,7 @@ def test_os_environment_overrides_dotenv(tmp_path: Path, monkeypatch: MonkeyPatc
 
 
 def write_settings(path: Path) -> None:
-    path.joinpath("db_talk.yaml").write_text(DEFAULT_SETTINGS, encoding="utf-8")
+    path.joinpath("dbtalk.yaml").write_text(DEFAULT_SETTINGS, encoding="utf-8")
 
 
 def clear_cli_environment() -> None:

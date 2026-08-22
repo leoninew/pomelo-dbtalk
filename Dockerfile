@@ -36,5 +36,5 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 USER app
 
-ENTRYPOINT ["db-talk"]
+ENTRYPOINT ["dbtalk"]
 CMD ["--help"]

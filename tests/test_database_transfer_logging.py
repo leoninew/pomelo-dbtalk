@@ -7,16 +7,16 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from db_talk.database.dsn import sqlite_dsn
-from db_talk.database.transfer import (
+from dbtalk.database.dsn import sqlite_dsn
+from dbtalk.database.transfer import (
     ExportOptions,
     ImportOptions,
     TransferConnection,
     export_database,
     import_database,
 )
-from db_talk.logging_config import configure_logging
-from db_talk.settings import LoggingSettings
+from dbtalk.logging_config import configure_logging
+from dbtalk.settings import LoggingSettings
 
 
 class DatabaseTransferLoggingTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class DatabaseTransferLoggingTests(unittest.TestCase):
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
 
-        with patch("db_talk.logging_config.logging.basicConfig") as configure:
+        with patch("dbtalk.logging_config.logging.basicConfig") as configure:
             configure_logging(config.level, config.format, verbose=False)
 
         configure.assert_called_once_with(

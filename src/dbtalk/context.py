@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import click
 
-from db_talk.settings import Settings
+from dbtalk.settings import Settings
 
 
 @dataclass(frozen=True)

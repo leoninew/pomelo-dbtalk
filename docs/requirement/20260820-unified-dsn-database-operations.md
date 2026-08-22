@@ -1,5 +1,5 @@
 # 统一 DSN 与通用数据库操作
-最后修改时间: 2026-08-20 22:29:25
+最后修改时间: 2026-08-22 21:21:46
 
 ---
 Review status: Accepted
@@ -9,7 +9,7 @@ Stage: Requirement
 
 ## Background
 
-当前 `db-talk database export/import` 将 SQLite 文件路径和 MySQL DSN 环境变量分别建模，
+当前 `dbtalk database export/import` 将 SQLite 文件路径和 MySQL DSN 环境变量分别建模，
 并在适配器内部直接依赖 `sqlite3` 与 `PyMySQL`。MySQL DSN 还由项目自行解析，导致新增数据库类型
 需要复制连接、事务、参数绑定和 schema 读取逻辑。
 
@@ -28,11 +28,11 @@ PostgreSQL 提供一致的连接与数据操作边界，降低后续扩展数据
    边界，不向调用方暴露不同连接对象和参数占位符规则。
 4. 为对外调用提供统一的 DSN 驱动数据库接口，覆盖同步和异步连接生命周期、参数化 SQL 执行、查询
    结果访问和事务边界。
-5. 增加 `db-talk database query` 与 `db-talk database exec` 子命令。`query` 支持 `table` 和 `json`
+5. 增加 `dbtalk database query` 与 `dbtalk database exec` 子命令。`query` 支持 `table` 和 `json`
    两种输出格式，默认使用 `table`；`exec` 输出受影响行数和执行状态。
 6. 将现有 JSONL `export/import` 的 SQLite、MySQL 连接和执行路径迁移到统一连接抽象，并增加
    PostgreSQL 端支持。
-7. 保持 `db-talk mysql dump/restore` 使用原生 `mysqldump`/`mysql` 客户端；SQL 备份内容和 restore
+7. 保持 `dbtalk mysql dump/restore` 使用原生 `mysqldump`/`mysql` 客户端；SQL 备份内容和 restore
    语义不因本需求改为 SQLAlchemy 执行。
 
 ## Non-goal
@@ -50,9 +50,9 @@ PostgreSQL 提供一致的连接与数据操作边界，降低后续扩展数据
    `sqlite_path`、MySQL 主机参数或专用连接对象。
 2. 调用方使用统一接口执行带参数的 SQL，并以统一的数据结构读取列名、行值和影响行数。
 3. 调用方在统一事务上下文中执行多条写操作，异常时回滚，成功时提交。
-4. 管理员通过 `db-talk database query` 使用 DSN 执行查询，默认得到适合终端查看的表格，也可以选择
+4. 管理员通过 `dbtalk database query` 使用 DSN 执行查询，默认得到适合终端查看的表格，也可以选择
    JSON 输出供脚本消费。
-5. 管理员通过 `db-talk database exec` 使用参数化 SQL 执行写操作，并获得非敏感的影响行数结果。
+5. 管理员通过 `dbtalk database exec` 使用参数化 SQL 执行写操作，并获得非敏感的影响行数结果。
 6. 异步调用方使用相同的 DSN 连接异步 engine，执行查询、写入和事务，而不直接操作各 DBAPI 的 async
    connection 类型。
 7. 管理员使用 JSONL export/import 在 SQLite、MySQL 和 PostgreSQL 之间传输既有表数据；数据库方言
@@ -71,9 +71,9 @@ PostgreSQL 提供一致的连接与数据操作边界，降低后续扩展数据
       原生连接类型。
 - [ ] 统一同步和异步接口支持参数化执行、查询结果列信息和行值访问、影响行数、提交、回滚及上下文
       关闭；异步接口不阻塞事件循环。
-- [ ] `db-talk database query` 接受完整 DSN 或 DSN 环境变量、SQL 和参数，`--format table|json` 默认 `table`；
+- [ ] `dbtalk database query` 接受完整 DSN 或 DSN 环境变量、SQL 和参数，`--format table|json` 默认 `table`；
       `json` 输出稳定的列名和 JSON 可编码值，`table` 对 NULL、空结果和宽列有明确表现。
-- [ ] `db-talk database exec` 接受完整 DSN 或 DSN 环境变量、单条参数化 SQL 和参数，成功输出影响行数；执行失败
+- [ ] `dbtalk database exec` 接受完整 DSN 或 DSN 环境变量、单条参数化 SQL 和参数，成功输出影响行数；执行失败
       返回非零状态且不泄露 DSN 或参数中的敏感值。
 - [ ] JSONL export/import 的 SQLite、MySQL 现有成功路径、`insert`/`upsert`、表级事务、外键检查、
       类型编码和 gzip 行为保持不变。
@@ -81,7 +81,7 @@ PostgreSQL 提供一致的连接与数据操作边界，降低后续扩展数据
       外键顺序、导出、导入和现有 JSONL 类型兼容校验。
 - [ ] MySQL、PostgreSQL 连接参数和 DSN 不出现在正常日志、错误摘要和 CLI 帮助示例中；密码不通过
       普通命令参数传递。
-- [ ] 现有 CLI 的 `db-talk mysql dump/restore` 行为保持兼容，且不依赖 SQLAlchemy 才能运行。
+- [ ] 现有 CLI 的 `dbtalk mysql dump/restore` 行为保持兼容，且不依赖 SQLAlchemy 才能运行。
 - [ ] 单元测试覆盖 DSN、同步/异步统一接口、参数绑定、事务回滚和三种 dialect 的 SQL/schema 差异；
       真实 MySQL/PostgreSQL 测试继续通过显式环境条件控制，未提供服务时跳过而非失败。
 - [ ] 文档说明 DSN 格式、驱动依赖、凭据注入方式、统一接口边界和 PostgreSQL 的已支持范围。

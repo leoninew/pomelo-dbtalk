@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import click
 
-from db_talk.context import DbtalkContext
+from dbtalk.context import DbtalkContext
 
 from .format import gzip_output_path
 from .operations import (

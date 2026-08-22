@@ -5,9 +5,9 @@ import pytest
 from click.testing import CliRunner
 from pytest import MonkeyPatch
 
-from db_talk import cli as cli_module
-from db_talk.cli import cli, main
-from db_talk.context import dbtalk_context
+from dbtalk import cli as cli_module
+from dbtalk.cli import cli, main
+from dbtalk.context import dbtalk_context
 
 
 def test_help_lists_database_command_groups() -> None:
@@ -22,7 +22,7 @@ def test_version_is_available_without_configuration() -> None:
     result = CliRunner().invoke(cli, ["--version"], catch_exceptions=False)
 
     assert result.exit_code == 0
-    assert "db-talk, version 0.1.0" in result.output
+    assert "dbtalk, version 0.1.0" in result.output
 
 
 def test_root_command_displays_help() -> None:
@@ -46,7 +46,7 @@ def test_mysql_and_database_help_are_available() -> None:
 
 
 def test_context_requires_root_initialization() -> None:
-    context = click.Context(click.Command("db-talk"))
+    context = click.Context(click.Command("dbtalk"))
 
     with pytest.raises(RuntimeError, match="CLI context was not initialized"):
         dbtalk_context(context)

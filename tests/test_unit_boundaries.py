@@ -13,13 +13,13 @@ from unittest.mock import patch
 import click
 import pytest
 
-import db_talk.database.cli as database_cli
-import db_talk.database.format as transfer_format
-import db_talk.database.mysql as mysql_transfer
-import db_talk.database.schema as schema
-import db_talk.mysql.client as mysql_client
-import db_talk.settings as dbtalk_settings
-from db_talk.database.models import (
+import dbtalk.database.cli as database_cli
+import dbtalk.database.format as transfer_format
+import dbtalk.database.mysql as mysql_transfer
+import dbtalk.database.schema as schema
+import dbtalk.mysql.client as mysql_client
+import dbtalk.settings as dbtalk_settings
+from dbtalk.database.models import (
     ColumnDefinition,
     DatabaseTransferError,
     TableBlock,
@@ -241,19 +241,19 @@ def test_mysql_client_file_and_command_helpers(tmp_path: Path) -> None:
     assert mysql_client.docker_database_host("localhost") == "host.docker.internal"
     assert mysql_client.docker_database_host("db.example") == "db.example"
     assert mysql_client.docker_host_gateway_args("db.example") == []
-    with patch("db_talk.mysql.client.platform.system", return_value="Linux"):
+    with patch("dbtalk.mysql.client.platform.system", return_value="Linux"):
         assert mysql_client.docker_host_gateway_args("localhost") == [
             "--add-host",
             "host.docker.internal:host-gateway",
         ]
 
     success = subprocess.CompletedProcess([], 0, "", "")
-    with patch("db_talk.mysql.client.subprocess.run", return_value=success) as run:
+    with patch("dbtalk.mysql.client.subprocess.run", return_value=success) as run:
         assert mysql_client.run_command(["mysql"], {"MYSQL_PWD": "secret"}) == success
         assert mysql_client.run_command(["mysql"], input_path=source) == success
     assert run.call_count == 2
     with (
-        patch("db_talk.mysql.client.subprocess.run", side_effect=OSError("missing")),
+        patch("dbtalk.mysql.client.subprocess.run", side_effect=OSError("missing")),
         pytest.raises(click.ClickException, match="Could not run mysql"),
     ):
         mysql_client.run_command(["mysql"])
@@ -267,20 +267,20 @@ def test_mysql_client_file_and_command_helpers(tmp_path: Path) -> None:
 
 
 def test_mysql_client_docker_discovery_and_cleanup() -> None:
-    with patch("db_talk.mysql.client.shutil.which", return_value=None):
+    with patch("dbtalk.mysql.client.shutil.which", return_value=None):
         assert mysql_client.docker_mysql_image() == (
             None,
             "Docker is not installed or is not on PATH.",
         )
     with (
-        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
-        patch("db_talk.mysql.client.subprocess.run", side_effect=OSError),
+        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
+        patch("dbtalk.mysql.client.subprocess.run", side_effect=OSError),
     ):
         assert mysql_client.docker_mysql_image() == (None, "Docker could not be started.")
     with (
-        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
+        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
         patch(
-            "db_talk.mysql.client.subprocess.run",
+            "dbtalk.mysql.client.subprocess.run",
             return_value=subprocess.CompletedProcess([], 1, "", ""),
         ),
     ):
@@ -289,17 +289,17 @@ def test_mysql_client_docker_discovery_and_cleanup() -> None:
             "Docker cannot inspect local images; check that its daemon is running.",
         )
     with (
-        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
+        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
         patch(
-            "db_talk.mysql.client.subprocess.run",
+            "dbtalk.mysql.client.subprocess.run",
             return_value=subprocess.CompletedProcess([], 0, "mysql:8.4\nmysql:latest\n", ""),
         ),
     ):
         assert mysql_client.docker_mysql_image() == ("mysql:latest", "")
     with (
-        patch("db_talk.mysql.client.shutil.which", return_value="docker"),
+        patch("dbtalk.mysql.client.shutil.which", return_value="docker"),
         patch(
-            "db_talk.mysql.client.subprocess.run",
+            "dbtalk.mysql.client.subprocess.run",
             return_value=subprocess.CompletedProcess([], 0, "mysql:<none>\npostgres:16\n", ""),
         ),
     ):
@@ -307,7 +307,7 @@ def test_mysql_client_docker_discovery_and_cleanup() -> None:
             None,
             "No local MySQL Docker image is available.",
         )
-    with patch("db_talk.mysql.client.subprocess.run") as remove:
+    with patch("dbtalk.mysql.client.subprocess.run") as remove:
         mysql_client.remove_temporary_container("dbtalk-test", {"MYSQL_PWD": "secret"})
     remove.assert_called_once()
 
@@ -421,7 +421,7 @@ def test_database_export_output_path_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    with patch("db_talk.database.cli.datetime") as mocked_datetime:
+    with patch("dbtalk.database.cli.datetime") as mocked_datetime:
         mocked_datetime.now.return_value = datetime(2026, 8, 20, 15, 45, 0)
         default_output = database_cli.resolve_export_output("sqlite", None, archive=False)
         output_directory = tmp_path / "exports"

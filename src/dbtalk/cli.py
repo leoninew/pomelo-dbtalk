@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import click
 
-from db_talk import __version__
-from db_talk.commands import database, mysql
-from db_talk.context import DbtalkContext
-from db_talk.logging_config import configure_logging
-from db_talk.settings import load_settings
+from dbtalk import __version__
+from dbtalk.commands import database, mysql
+from dbtalk.context import DbtalkContext
+from dbtalk.logging_config import configure_logging
+from dbtalk.settings import load_settings
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
@@ -17,7 +17,7 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
     context_settings=CONTEXT_SETTINGS,
     invoke_without_command=True,
 )
-@click.version_option(version=__version__, prog_name="db-talk")
+@click.version_option(version=__version__, prog_name="dbtalk")
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug log messages.")
 @click.pass_context
 def cli(ctx: click.Context, verbose: bool) -> None:

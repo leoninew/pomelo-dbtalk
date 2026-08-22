@@ -4,10 +4,10 @@ from pathlib import Path
 
 import click
 
-from db_talk.context import dbtalk_context
-from db_talk.database.dsn import dsn_from_environment, parse_dsn
-from db_talk.database.models import DatabaseOperationError
-from db_talk.settings import Settings
+from dbtalk.context import dbtalk_context
+from dbtalk.database.dsn import dsn_from_environment, parse_dsn
+from dbtalk.database.models import DatabaseOperationError
+from dbtalk.settings import Settings
 
 from .client import mysql_client_args, mysql_connection_args
 from .dump import (

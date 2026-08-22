@@ -1,17 +1,17 @@
 ---
 name: dbtalk-mysql
-description: 使用 db-talk mysql 实际导出 MySQL 数据库或恢复 mysqldump SQL 文件。用户要求 MySQL backup、dump、restore、导入 .sql，或配置 mysqldump/mysqlrestore 时使用。
+description: 使用 dbtalk mysql 实际导出 MySQL 数据库或恢复 mysqldump SQL 文件。用户要求 MySQL backup、dump、restore、导入 .sql，或配置 mysqldump/mysqlrestore 时使用。
 ---
 
-# db-talk MySQL
+# dbtalk MySQL
 
-使用 `db-talk mysql` 处理 MySQL 原生 SQL dump 和 restore。优先使用本机的 `mysqldump` 或 `mysql`；本机客户端缺失时，只能回退到本机已有的 Docker `mysql` 镜像。不要安装客户端、拉取镜像或替换为其他备份工具。
+使用 `dbtalk mysql` 处理 MySQL 原生 SQL dump 和 restore。优先使用本机的 `mysqldump` 或 `mysql`；本机客户端缺失时，只能回退到本机已有的 Docker `mysql` 镜像。不要安装客户端、拉取镜像或替换为其他备份工具。
 
 先确认可用参数：
 
 ```powershell
-uv run db-talk mysql dump --help
-uv run db-talk mysql restore --help
+uv run dbtalk mysql dump --help
+uv run dbtalk mysql restore --help
 ```
 
 ## 配置与凭据
@@ -30,8 +30,8 @@ APP_DSN=mysql+pymysql://user:password@host:3306/database
 dump 需要完整的 MySQL DSN。未传 `--output` 时，输出默认为当前目录的 `data/<database>-<timestamp>.sql`，并会自动创建配置的输出目录。显式传入 `--output` 且路径是已有目录时，也会在其中生成同样的时间戳文件。其他路径视为文件，父目录必须已存在；不存在的路径不会被推断为目录或自动创建。
 
 ```powershell
-uv run db-talk mysql dump --dsn-env APP_DSN --output .\data\app.sql
-uv run db-talk mysql dump --dsn-env APP_DSN --output .\data\app.sql --archive
+uv run dbtalk mysql dump --dsn-env APP_DSN --output .\data\app.sql
+uv run dbtalk mysql dump --dsn-env APP_DSN --output .\data\app.sql --archive
 ```
 
 `--archive` 写入 `.sql.gz`；输出路径没有 `.gz` 后缀时会自动追加。`--create-database` 和 `--drop-database` 分别包含 `CREATE DATABASE` 和 `DROP DATABASE`。非本机 MySQL host 使用连接压缩；`localhost` 与 `127.0.0.1` 不使用该参数。
@@ -43,7 +43,7 @@ uv run db-talk mysql dump --dsn-env APP_DSN --output .\data\app.sql --archive
 restore 需要已有的 `.sql` 或 `.sql.gz` 文件，以及完整的 MySQL DSN。目标库必须已存在，除非 SQL 文件本身会创建它。
 
 ```powershell
-uv run db-talk mysql restore --dsn-env APP_DSN --input .\data\app-20260820-120000.sql.gz
+uv run dbtalk mysql restore --dsn-env APP_DSN --input .\data\app-20260820-120000.sql.gz
 ```
 
 只有在目标连接、目标库、输入文件来源和写入授权已明确时才能执行 restore。若 dump 含有源数据库的 `CREATE DATABASE`、`DROP DATABASE` 或 `USE`，通过 `--database <target>` 显式指定目标库；命令会在临时输入中跳过源库数据库 DDL 并重写 `USE`，不会修改原始 dump 文件。

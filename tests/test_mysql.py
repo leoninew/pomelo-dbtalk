@@ -11,8 +11,8 @@ from unittest.mock import ANY, patch
 import click
 from click.testing import CliRunner
 
-from db_talk.cli import cli as main_command
-from db_talk.mysql.cli import (
+from dbtalk.cli import cli as main_command
+from dbtalk.mysql.cli import (
     MysqlDumpOptions,
     MysqlDumpOverrides,
     MysqlRestoreOptions,
@@ -27,7 +27,7 @@ from db_talk.mysql.cli import (
     resolve_restore_options,
     restore_database,
 )
-from db_talk.settings import MySQLDumpConfig, MySQLRestoreConfig
+from dbtalk.settings import MySQLDumpConfig, MySQLRestoreConfig
 
 
 class MysqlCommandTests(unittest.TestCase):
@@ -96,11 +96,11 @@ class MysqlCommandTests(unittest.TestCase):
 
         with (
             patch(
-                "db_talk.mysql.dump.shutil.which",
+                "dbtalk.mysql.dump.shutil.which",
                 return_value="/usr/bin/mysqldump",
             ),
             patch(
-                "db_talk.mysql.dump.run_command",
+                "dbtalk.mysql.dump.run_command",
                 return_value=CompletedProcess([], 0, "", ""),
             ) as run,
         ):
@@ -144,16 +144,16 @@ class MysqlCommandTests(unittest.TestCase):
         success = CompletedProcess([], 0, "", "")
 
         with (
-            patch("db_talk.mysql.dump.shutil.which", return_value=None),
+            patch("dbtalk.mysql.dump.shutil.which", return_value=None),
             patch(
-                "db_talk.mysql.dump.docker_mysql_image",
+                "dbtalk.mysql.dump.docker_mysql_image",
                 return_value=("mysql:8.4", ""),
             ),
             patch(
-                "db_talk.mysql.dump.run_command",
+                "dbtalk.mysql.dump.run_command",
                 side_effect=[success, success],
             ) as run,
-            patch("db_talk.mysql.dump.remove_temporary_container"),
+            patch("dbtalk.mysql.dump.remove_temporary_container"),
         ):
             output = dump_database(options)
 
@@ -198,10 +198,10 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch(
-                    "db_talk.mysql.dump.shutil.which",
+                    "dbtalk.mysql.dump.shutil.which",
                     return_value="/usr/bin/mysqldump",
                 ),
-                patch("db_talk.mysql.dump.run_command", side_effect=write_dump),
+                patch("dbtalk.mysql.dump.run_command", side_effect=write_dump),
             ):
                 output = dump_database(options)
 
@@ -215,7 +215,7 @@ class MysqlCommandTests(unittest.TestCase):
         with (
             runner.isolated_filesystem(),
             patch(
-                "db_talk.mysql.cli.dump_database",
+                "dbtalk.mysql.cli.dump_database",
                 side_effect=lambda options: options.output,
             ) as dump,
         ):
@@ -248,7 +248,7 @@ class MysqlCommandTests(unittest.TestCase):
         with (
             runner.isolated_filesystem(),
             patch(
-                "db_talk.mysql.cli.dump_database",
+                "dbtalk.mysql.cli.dump_database",
                 side_effect=lambda options: options.output,
             ) as dump,
         ):
@@ -310,7 +310,7 @@ class MysqlCommandTests(unittest.TestCase):
 
         with (
             runner.isolated_filesystem(),
-            patch("db_talk.mysql.dump.datetime") as mocked_datetime,
+            patch("dbtalk.mysql.dump.datetime") as mocked_datetime,
         ):
             Path("exports").mkdir()
             mocked_datetime.now.return_value = datetime(2026, 8, 20, 15, 45, 0)
@@ -340,7 +340,7 @@ class MysqlCommandTests(unittest.TestCase):
         with (
             runner.isolated_filesystem(),
             patch(
-                "db_talk.mysql.cli.dump_database",
+                "dbtalk.mysql.cli.dump_database",
                 side_effect=lambda options: options.output,
             ) as dump,
         ):
@@ -479,9 +479,9 @@ class MysqlCommandTests(unittest.TestCase):
 
         message = "mysqldump is not available. Docker is not installed or is not on PATH."
         with (
-            patch("db_talk.mysql.dump.shutil.which", return_value=None),
+            patch("dbtalk.mysql.dump.shutil.which", return_value=None),
             patch(
-                "db_talk.mysql.dump.docker_mysql_image",
+                "dbtalk.mysql.dump.docker_mysql_image",
                 return_value=(None, "Docker is not installed or is not on PATH."),
             ),
             self.assertRaisesRegex(
@@ -520,11 +520,11 @@ class MysqlCommandTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "db_talk.mysql.restore.shutil.which",
+                    "dbtalk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
                 patch(
-                    "db_talk.mysql.restore.run_command",
+                    "dbtalk.mysql.restore.run_command",
                     return_value=CompletedProcess([], 0, "", ""),
                 ) as run,
             ):
@@ -578,10 +578,10 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch(
-                    "db_talk.mysql.restore.shutil.which",
+                    "dbtalk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
-                patch("db_talk.mysql.restore.run_command", side_effect=read_dump),
+                patch("dbtalk.mysql.restore.run_command", side_effect=read_dump),
             ):
                 restored = restore_database(options)
 
@@ -622,11 +622,11 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch(
-                    "db_talk.mysql.restore.shutil.which",
+                    "dbtalk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
                 patch(
-                    "db_talk.mysql.restore.run_command",
+                    "dbtalk.mysql.restore.run_command",
                     side_effect=capture_input,
                 ),
             ):
@@ -663,16 +663,16 @@ class MysqlCommandTests(unittest.TestCase):
             success = CompletedProcess([], 0, "", "")
 
             with (
-                patch("db_talk.mysql.restore.shutil.which", return_value=None),
+                patch("dbtalk.mysql.restore.shutil.which", return_value=None),
                 patch(
-                    "db_talk.mysql.restore.docker_mysql_image",
+                    "dbtalk.mysql.restore.docker_mysql_image",
                     return_value=("mysql:8.4", ""),
                 ),
                 patch(
-                    "db_talk.mysql.restore.run_command",
+                    "dbtalk.mysql.restore.run_command",
                     return_value=success,
                 ) as run,
-                patch("db_talk.mysql.restore.remove_temporary_container"),
+                patch("dbtalk.mysql.restore.remove_temporary_container"),
             ):
                 restored_input = restore_database(options)
 
@@ -706,9 +706,9 @@ class MysqlCommandTests(unittest.TestCase):
 
             message = "mysql is not available. Docker is not installed or is not on PATH."
             with (
-                patch("db_talk.mysql.restore.shutil.which", return_value=None),
+                patch("dbtalk.mysql.restore.shutil.which", return_value=None),
                 patch(
-                    "db_talk.mysql.restore.docker_mysql_image",
+                    "dbtalk.mysql.restore.docker_mysql_image",
                     return_value=(None, "Docker is not installed or is not on PATH."),
                 ),
                 self.assertRaisesRegex(
@@ -767,7 +767,7 @@ class MysqlCommandTests(unittest.TestCase):
         with (
             runner.isolated_filesystem(),
             patch(
-                "db_talk.mysql.cli.restore_database",
+                "dbtalk.mysql.cli.restore_database",
                 side_effect=lambda options: options.input.resolve(),
             ) as restore,
         ):

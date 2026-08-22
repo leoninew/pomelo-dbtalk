@@ -15,13 +15,13 @@ from zoneinfo import ZoneInfo
 
 from click.testing import CliRunner
 
-from db_talk.cli import cli as main
-from db_talk.database.dsn import sqlite_dsn
-from db_talk.database.mysql import (
+from dbtalk.cli import cli as main
+from dbtalk.database.dsn import sqlite_dsn
+from dbtalk.database.mysql import (
     _encode_mysql_value,
     _mysql_time_of_day,
 )
-from db_talk.database.transfer import (
+from dbtalk.database.transfer import (
     ColumnDefinition,
     DatabaseTransferError,
     ExportOptions,
@@ -714,7 +714,7 @@ class DatabaseTransferTests(unittest.TestCase):
     def test_cli_passes_zero_date_configuration_to_mysql_export(self) -> None:
         with (
             patch(
-                "db_talk.database.cli.export_database",
+                "dbtalk.database.cli.export_database",
                 return_value=TransferSummary(table_count=0, row_count=0),
             ) as export,
             patch.dict(
@@ -771,7 +771,7 @@ class DatabaseTransferTests(unittest.TestCase):
             ZoneInfo("UTC"),
         )
         with patch(
-            "db_talk.database.transfer.export_sqlalchemy",
+            "dbtalk.database.transfer.export_sqlalchemy",
             return_value=TransferSummary(table_count=1, row_count=2),
         ) as export:
             self.assertEqual(export_database(options).row_count, 2)
@@ -784,7 +784,7 @@ class DatabaseTransferTests(unittest.TestCase):
             ZoneInfo("UTC"),
         )
         with patch(
-            "db_talk.database.transfer.import_sqlalchemy",
+            "dbtalk.database.transfer.import_sqlalchemy",
             return_value=TransferSummary(table_count=1, row_count=2),
         ) as importer:
             self.assertEqual(import_database(import_options).row_count, 2)

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from db_talk.settings import DEFAULT_MYSQL_PORT
+from dbtalk.settings import DEFAULT_MYSQL_PORT
 
 LOCAL_MYSQL_HOSTS = frozenset({"localhost", "127.0.0.1"})
 

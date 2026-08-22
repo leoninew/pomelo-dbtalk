@@ -16,8 +16,8 @@ from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
-from db_talk.cli import cli
-from db_talk.database.connection import (
+from dbtalk.cli import cli
+from dbtalk.database.connection import (
     AsyncDatabaseClient,
     AsyncDatabaseSession,
     DatabaseClient,
@@ -25,8 +25,8 @@ from db_talk.database.connection import (
     create_async_client,
     create_client,
 )
-from db_talk.database.dsn import dsn_from_environment, dsn_metadata, parse_dsn, sqlite_dsn
-from db_talk.database.models import (
+from dbtalk.database.dsn import dsn_from_environment, dsn_metadata, parse_dsn, sqlite_dsn
+from dbtalk.database.models import (
     ColumnDefinition,
     DatabaseOperationError,
     DatabaseTransferError,
@@ -36,14 +36,14 @@ from db_talk.database.models import (
     TableSchema,
     TransferConnection,
 )
-from db_talk.database.operations import (
+from dbtalk.database.operations import (
     execute_from_environment,
     json_safe_value,
     parse_parameters,
     query_from_environment,
     render_query,
 )
-from db_talk.database.sqlalchemy_transfer import (
+from dbtalk.database.sqlalchemy_transfer import (
     _encoded_rows,
     _prepare_connection,
     _quote_identifier,
@@ -51,7 +51,7 @@ from db_talk.database.sqlalchemy_transfer import (
     _target_values,
     _verify_database,
 )
-from db_talk.database.transfer import export_database, import_database, validate_connection
+from dbtalk.database.transfer import export_database, import_database, validate_connection
 
 
 def create_database(path: Path) -> None:

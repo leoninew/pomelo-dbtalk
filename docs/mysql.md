@@ -1,12 +1,12 @@
 # MySQL 手册
 
-`db-talk mysql` 用于创建 MySQL 原生 SQL dump，以及还原 `.sql` 或 `.sql.gz` 文件。连接入口与其他
+`dbtalk mysql` 用于创建 MySQL 原生 SQL dump，以及还原 `.sql` 或 `.sql.gz` 文件。连接入口与其他
 数据库命令一致：`dump` 和 `restore` 都必须接受且只接受一个 `--dsn DSN` 或 `--dsn-env NAME`。
 
 ```powershell
-uv run db-talk mysql --help
-uv run db-talk mysql dump --help
-uv run db-talk mysql restore --help
+uv run dbtalk mysql --help
+uv run dbtalk mysql dump --help
+uv run dbtalk mysql restore --help
 ```
 
 ## DSN
@@ -14,12 +14,12 @@ uv run db-talk mysql restore --help
 MySQL backup/restore 只接受明确的 `mysql+pymysql://` DSN：
 
 ```powershell
-uv run db-talk mysql dump `
+uv run dbtalk mysql dump `
   --dsn 'mysql+pymysql://user:password@host:3306/app' `
   --output .\data\app.sql
 
 $env:APP_DSN = 'mysql+pymysql://user:password@host:3306/app'
-uv run db-talk mysql restore `
+uv run dbtalk mysql restore `
   --dsn-env APP_DSN `
   --input .\data\app.sql.gz
 ```
@@ -31,7 +31,7 @@ uv run db-talk mysql restore `
 ## Dump
 
 ```powershell
-uv run db-talk mysql dump `
+uv run dbtalk mysql dump `
   --dsn 'mysql+pymysql://user:password@host:3306/app' `
   --output .\data\app.sql `
   --create-database `
@@ -53,7 +53,7 @@ uv run db-talk mysql dump `
 ## Restore
 
 ```powershell
-uv run db-talk mysql restore `
+uv run dbtalk mysql restore `
   --dsn 'mysql+pymysql://user:password@host:3306/app' `
   --input .\data\app.sql.gz
 ```
@@ -68,5 +68,5 @@ uv run db-talk mysql restore `
 
 ## 客户端与故障处理
 
-`db-talk` 优先使用本机 `mysqldump` 或 `mysql` 可执行文件。缺失时才使用本机已有的 Docker `mysql` 镜像；
+`dbtalk` 优先使用本机 `mysqldump` 或 `mysql` 可执行文件。缺失时才使用本机已有的 Docker `mysql` 镜像；
 不会安装客户端、拉取镜像、创建数据库或自动重试。

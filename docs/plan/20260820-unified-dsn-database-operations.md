@@ -1,5 +1,5 @@
 # 统一 DSN 与通用数据库操作
-最后修改时间: 2026-08-20 22:29:25
+最后修改时间: 2026-08-22 21:22:40
 
 ---
 Review status: Accepted
@@ -12,8 +12,8 @@ Stage: Plan
 本计划实施已接受的 [Requirement](../requirement/20260820-unified-dsn-database-operations.md)。
 变更范围跨越依赖、连接抽象、CLI、JSONL transfer、三种数据库 dialect、同步/异步 API 和测试。
 
-现有 `db-talk mysql dump/restore` 仍是原生客户端封装，本计划不把它迁移到 SQLAlchemy；统一 DSN
-首先服务于 `db-talk database` 和公开数据库操作 API。
+现有 `dbtalk mysql dump/restore` 仍是原生客户端封装，本计划不把它迁移到 SQLAlchemy；统一 DSN
+首先服务于 `dbtalk database` 和公开数据库操作 API。
 
 ## Scope and CLI contract
 
@@ -45,13 +45,13 @@ MySQL/PostgreSQL driver 或文件路径参数，也不向日志或异常传播�
 ### New CLI commands
 
 ```text
-db-talk database query \
+dbtalk database query \
   --dsn-env APP_DSN \
   --sql "SELECT id, name FROM users WHERE id = :id" \
   --param id=1 \
   --format table|json
 
-db-talk database exec \
+dbtalk database exec \
   --dsn-env APP_DSN \
   --sql "UPDATE users SET name = :name WHERE id = :id" \
   --param name='"Ada"' \
@@ -73,8 +73,8 @@ db-talk database exec \
 保留现有一级和二级命令：
 
 ```text
-db-talk database export --source sqlite|mysql|postgresql ...
-db-talk database import --target sqlite|mysql|postgresql ...
+dbtalk database export --source sqlite|mysql|postgresql ...
+dbtalk database import --target sqlite|mysql|postgresql ...
 ```
 
 统一入口为 `--dsn DSN` 或 `--dsn-env NAME`，不保留 `--sqlite-path`、`--mysql-dsn-env` 或其他数据库
@@ -90,9 +90,9 @@ db-talk database import --target sqlite|mysql|postgresql ...
    - 在 `models.py` 增加 `postgresql` driver、DSN 连接模型、统一查询/执行结果模型和参数类型。
 
 2. 建立统一 DSN 和 engine 工厂。
-   - 新增 `src/db_talk/database/dsn.py`：使用 SQLAlchemy `make_url`/`URL` 解析 DSN，只允许明确的
+   - 新增 `src/dbtalk/database/dsn.py`：使用 SQLAlchemy `make_url`/`URL` 解析 DSN，只允许明确的
      driver，支持 async driver 选择、环境变量读取和脱敏摘要。
-   - 新增 `src/db_talk/database/connection.py`：封装 sync `Engine`/`Connection` 与 async
+   - 新增 `src/dbtalk/database/connection.py`：封装 sync `Engine`/`Connection` 与 async
      `AsyncEngine`/`AsyncConnection`，提供连接生命周期、事务上下文和统一异常映射。
    - 新增 `DatabaseClient` / `AsyncDatabaseClient` 或等价协议，公开 `query`、`execute`、
      `transaction`，返回不暴露 DBAPI 原生连接类型的结果模型。
@@ -100,14 +100,14 @@ db-talk database import --target sqlite|mysql|postgresql ...
      逻辑使用 dialect preparer 安全引用。
 
 3. 实现通用操作的结果和 CLI 层。
-   - 新增 `src/db_talk/database/operations.py`，负责参数解析、query/exec 编排、JSON-safe 值转换、
+   - 新增 `src/dbtalk/database/operations.py`，负责参数解析、query/exec 编排、JSON-safe 值转换、
      table/json 渲染和非敏感错误转换。
-    - 扩展 `src/db_talk/database/cli.py`，增加 `query` 与 `exec` 命令、`--dsn`/`--dsn-env`、`--sql`、
+    - 扩展 `src/dbtalk/database/cli.py`，增加 `query` 与 `exec` 命令、`--dsn`/`--dsn-env`、`--sql`、
      重复 `--param` 和 query 的 `--format`。
-   - 在 `src/db_talk/commands/database.py` 和根 help 文案中接入新命令，保持现有命令组结构。
+   - 在 `src/dbtalk/commands/database.py` 和根 help 文案中接入新命令，保持现有命令组结构。
 
 4. 将 JSONL transfer 迁移到 SQLAlchemy 连接边界。
-   - 新增 `src/db_talk/database/sqlalchemy_transfer.py` 或同等 adapter，使用 SQLAlchemy Inspector
+   - 新增 `src/dbtalk/database/sqlalchemy_transfer.py` 或同等 adapter，使用 SQLAlchemy Inspector
      读取普通表、列、主键和外键，统一生成 `TableSchema`。
    - 迁移 SQLite/MySQL 的导出、导入和 schema 预检，保持 1000 行批量读取、临时文件原子替换、
      双遍导入和单表事务。
@@ -125,7 +125,7 @@ db-talk database import --target sqlite|mysql|postgresql ...
      参数。
    - 更新 `validate_connection`、成功日志和错误信息，只输出 dialect、host、port、database 等
      脱敏元数据。
-   - 保持 `src/db_talk/mysql/dump.py`、`restore.py`、`client.py` 的原生客户端路径不变；必要时只
+   - 保持 `src/dbtalk/mysql/dump.py`、`restore.py`、`client.py` 的原生客户端路径不变；必要时只
      复用独立的 DSN 脱敏/解析工具，不让 SQLAlchemy 成为其运行依赖。
 
 6. 实现同步/异步测试和跨 dialect 契约。
@@ -151,16 +151,16 @@ db-talk database import --target sqlite|mysql|postgresql ...
 
 - `pyproject.toml`
 - `uv.lock`
-- `src/db_talk/database/models.py`
-- `src/db_talk/database/dsn.py`
-- `src/db_talk/database/connection.py`
-- `src/db_talk/database/operations.py`
-- `src/db_talk/database/sqlalchemy_transfer.py`
-- `src/db_talk/database/cli.py`
-- `src/db_talk/database/transfer.py`
-- `src/db_talk/database/schema.py`
-- `src/db_talk/database/mysql.py`
-- `src/db_talk/commands/database.py`
+- `src/dbtalk/database/models.py`
+- `src/dbtalk/database/dsn.py`
+- `src/dbtalk/database/connection.py`
+- `src/dbtalk/database/operations.py`
+- `src/dbtalk/database/sqlalchemy_transfer.py`
+- `src/dbtalk/database/cli.py`
+- `src/dbtalk/database/transfer.py`
+- `src/dbtalk/database/schema.py`
+- `src/dbtalk/database/mysql.py`
+- `src/dbtalk/commands/database.py`
 - `tests/test_database_dsn.py`
 - `tests/test_database_operations.py`
 - `tests/test_database_cli.py`
@@ -206,7 +206,7 @@ db-talk database import --target sqlite|mysql|postgresql ...
 - `--param NAME=JSON_VALUE` 是第一版 query/exec 参数契约；不支持多语句和参数文件。
 - CLI 使用同步 engine；异步支持通过公开 Python API 完成，不要求 CLI 运行在 event loop 中。
 - SQLAlchemy、同步/异步 DBAPI 驱动和 `tabulate` 随主依赖安装，以保证声明支持的数据库开箱可用；若锁文件或部署体积出现实际约束，再拆分 optional extras 并记录范围变化。
-- `db-talk mysql dump/restore` 也接受统一的 MySQL DSN，解析后仍调用原生客户端；不再接受 host、port、
+- `dbtalk mysql dump/restore` 也接受统一的 MySQL DSN，解析后仍调用原生客户端；不再接受 host、port、
   user、password、database 分散参数。
 
 ## Risks
