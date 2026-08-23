@@ -12,6 +12,7 @@ from dbtalk.database.models import DatabaseOperationError
 from dbtalk.settings import Settings
 
 from .client import PostgresConnection
+from .database import database as database_management
 from .dump import PostgresDumpOptions, dump_database, resolve_dump_options
 from .restore import PostgresRestoreOptions, restore_database
 
@@ -30,6 +31,9 @@ __all__ = [
 @click.group("postgres", context_settings=CONTEXT_SETTINGS)
 def postgres() -> None:
     """Run PostgreSQL custom archive dump and restore operations."""
+
+
+postgres.add_command(database_management)
 
 
 @postgres.command("dump", context_settings=CONTEXT_SETTINGS)

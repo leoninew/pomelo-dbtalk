@@ -7,8 +7,8 @@ SQLite/MySQL/PostgreSQL 间的 JSONL 数据传输，以及 MySQL 和 PostgreSQL 
 
 | 一级子命令 | 用途 | 手册 |
 | --- | --- | --- |
-| `dbtalk mysql` | 创建和还原 MySQL 原生 SQL dump。 | [MySQL 手册](docs/mysql.md) |
-| `dbtalk postgres` | 创建和还原 PostgreSQL custom archive。 | [PostgreSQL 手册](docs/postgres.md) |
+| `dbtalk mysql` | 管理 MySQL database，或创建和还原原生 SQL dump。 | [MySQL 手册](docs/mysql.md) |
+| `dbtalk postgres` | 管理 PostgreSQL database，或创建和还原 custom archive。 | [PostgreSQL 手册](docs/postgres.md) |
 | `dbtalk database` | 执行 query/exec，或在既有 SQLite、MySQL、PostgreSQL schema 间通过 JSONL 传输数据。 | [数据库手册](docs/database.md) |
 
 Codex 使用本项目时，参见 [Codex 插件与 Skills](docs/codex.md)。
@@ -28,7 +28,9 @@ uv run dbtalk --help
 
 ```powershell
 uv run dbtalk mysql --help
+uv run dbtalk mysql database --help
 uv run dbtalk postgres --help
+uv run dbtalk postgres database --help
 uv run dbtalk database --help
 uv run dbtalk database query --help
 uv run dbtalk database exec --help

@@ -1,10 +1,11 @@
 # MySQL 手册
 
-`dbtalk mysql` 用于创建 MySQL 原生 SQL dump，以及还原 `.sql` 或 `.sql.gz` 文件。连接入口与其他
-数据库命令一致：`dump` 和 `restore` 都必须接受且只接受一个 `--dsn DSN` 或 `--dsn-env NAME`。
+`dbtalk mysql` 用于管理 MySQL 数据库，以及创建和还原原生 SQL dump。每个子命令都必须接受且只接受一个
+`--dsn DSN` 或 `--dsn-env NAME`。
 
 ```powershell
 uv run dbtalk mysql --help
+uv run dbtalk mysql database --help
 uv run dbtalk mysql dump --help
 uv run dbtalk mysql restore --help
 ```
@@ -27,6 +28,23 @@ uv run dbtalk mysql restore `
 `mysql://`、`postgresql://`、`postgres://`、Go 风格 DSN 和 host/user/password/database 分散参数都
 不是 canonical DSN。完整 DSN 可能包含密码；脚本中优先使用 `--dsn-env`。密码只通过 `MYSQL_PWD`
 传递给原生客户端，正常输出不会回显密码。
+
+## Database management
+
+`database` 子命令只管理 MySQL 数据库本身，不执行任意 SQL、不管理账号，也不替代 dump/restore。DSN 必须
+指向实例中一个已存在且可连接的管理库，所用账号需要相应的 MySQL 数据库管理权限。
+
+```powershell
+$env:MYSQL_MANAGEMENT_DSN = 'mysql+pymysql://operator:password@db.example.com:3306/mysql'
+
+uv run dbtalk mysql database list --dsn-env MYSQL_MANAGEMENT_DSN
+uv run dbtalk mysql database create --dsn-env MYSQL_MANAGEMENT_DSN --name app_db
+uv run dbtalk mysql database drop --dsn-env MYSQL_MANAGEMENT_DSN --name app_db --yes
+```
+
+`list` 输出可见数据库名。`create` 使用服务端默认创建属性。`drop` 是不可逆操作，必须显式提供 `--yes`；
+失败时命令只报告动作失败，不会输出 DSN 密码。MySQL 的名称、权限和 DDL 行为由服务器决定，执行前确认
+目标名称和连接账号。
 
 ## Dump
 

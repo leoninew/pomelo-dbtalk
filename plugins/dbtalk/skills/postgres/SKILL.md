@@ -1,18 +1,19 @@
 ---
 name: dbtalk-postgres
-description: 使用 dbtalk postgres 创建或恢复 PostgreSQL 单库 custom archive。用户要求 PostgreSQL backup、dump、restore、pg_dump、pg_restore 或配置 PostgreSQL Docker client image 时使用。
+description: 使用 dbtalk postgres 管理 PostgreSQL database，或创建和恢复单库 custom archive。用户要求 PostgreSQL database create/drop/list、backup、dump、restore 时使用。
 ---
 
 # dbtalk PostgreSQL
 
-使用 `dbtalk postgres` 处理单个 PostgreSQL 数据库的 native logical dump 和 restore。它创建并消费
-`pg_dump --format=custom` archive，不用于 JSONL 数据传输、物理备份、WAL/PITR、role 或 tablespace。
+使用 `dbtalk postgres` 管理 PostgreSQL database，或处理单个 PostgreSQL 数据库的 native logical
+dump 和 restore。它创建并消费 `pg_dump --format=custom` archive，不用于 JSONL 数据传输、物理备份、WAL/PITR、role 或 tablespace。
 
 先确认可用参数：
 
 ```powershell
 uv run dbtalk postgres dump --help
 uv run dbtalk postgres restore --help
+uv run dbtalk postgres database --help
 ```
 
 ## 连接与客户端
@@ -28,6 +29,21 @@ $env:APP_DSN = 'postgresql+psycopg://backup:password@db.example.com:5432/app'
 优先使用本机 `pg_dump` / `pg_restore`。缺失时，只能使用 `postgres.client_image` 配置的本地 Docker image，
 默认 `postgres:18`；不会安装客户端、拉取 image 或自动重试。必要时通过
 `DBTALK_POSTGRES__CLIENT_IMAGE` 配置与源服务端兼容的更高 major image。
+
+## Database management
+
+数据库生命周期操作使用 `dbtalk postgres database`，与 query/exec、role 管理和 dump/restore 分离。管理
+DSN 必须连接到目标以外的维护库，通常为 `postgres`，并使用具有建库或删库权限的账号。
+
+```powershell
+uv run dbtalk postgres database list --dsn-env POSTGRES_MANAGEMENT_DSN
+uv run dbtalk postgres database create --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db
+uv run dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --yes
+```
+
+先执行 `list` 核对目标。删除不可逆，只有用户明确授权删除指定目标时才传入 `--yes`；不能删除管理 DSN
+正在连接的数据库。存在其他连接时应如实报告失败，不主动终止其他会话；不猜测目标、不执行任意 SQL、
+不创建或管理 role。
 
 ## Dump
 

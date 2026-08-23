@@ -10,6 +10,7 @@ from dbtalk.database.models import DatabaseOperationError
 from dbtalk.settings import Settings
 
 from .client import mysql_client_args, mysql_connection_args
+from .database import database as database_management
 from .dump import (
     MysqlDumpOptions,
     MysqlDumpOverrides,
@@ -53,6 +54,9 @@ __all__ = [
 @click.group("mysql", context_settings=CONTEXT_SETTINGS)
 def mysql() -> None:
     """Run MySQL dump and restore operations."""
+
+
+mysql.add_command(database_management)
 
 
 @mysql.command("dump", context_settings=CONTEXT_SETTINGS)

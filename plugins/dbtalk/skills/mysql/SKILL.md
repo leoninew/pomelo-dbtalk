@@ -1,17 +1,20 @@
 ---
 name: dbtalk-mysql
-description: 使用 dbtalk mysql 实际导出 MySQL 数据库或恢复 mysqldump SQL 文件。用户要求 MySQL backup、dump、restore、导入 .sql，或配置 mysqldump/mysqlrestore 时使用。
+description: 使用 dbtalk mysql 管理 MySQL database，或导出和恢复 mysqldump SQL 文件。用户要求 MySQL database create/drop/list、backup、dump、restore 或导入 .sql 时使用。
 ---
 
 # dbtalk MySQL
 
-使用 `dbtalk mysql` 处理 MySQL 原生 SQL dump 和 restore。优先使用本机的 `mysqldump` 或 `mysql`；本机客户端缺失时，只能回退到本机已有的 Docker `mysql` 镜像。不要安装客户端、拉取镜像或替换为其他备份工具。
+使用 `dbtalk mysql` 管理 MySQL database，或处理原生 SQL dump 和 restore。dump/restore 优先使用本机的
+`mysqldump` 或 `mysql`；本机客户端缺失时，只能回退到本机已有的 Docker `mysql` 镜像。不要安装客户端、
+拉取镜像或替换为其他备份工具。
 
 先确认可用参数：
 
 ```powershell
 uv run dbtalk mysql dump --help
 uv run dbtalk mysql restore --help
+uv run dbtalk mysql database --help
 ```
 
 ## 配置与凭据
@@ -24,6 +27,20 @@ database 分散参数。支持的 MySQL DSN 是 `mysql+pymysql://user:password@h
 ```env
 APP_DSN=mysql+pymysql://user:password@host:3306/database
 ```
+
+## Database management
+
+数据库生命周期操作使用 `dbtalk mysql database`，与 query/exec、账号管理和 dump/restore 分离。管理 DSN
+必须指向一个已有 MySQL 数据库，并使用具有相应数据库管理权限的账号。
+
+```powershell
+uv run dbtalk mysql database list --dsn-env MYSQL_MANAGEMENT_DSN
+uv run dbtalk mysql database create --dsn-env MYSQL_MANAGEMENT_DSN --name app_db
+uv run dbtalk mysql database drop --dsn-env MYSQL_MANAGEMENT_DSN --name app_db --yes
+```
+
+先执行 `list` 核对目标。创建后只报告数据库名。删除不可逆，只有用户明确授权删除指定目标时才传入
+`--yes`；不猜测目标、不执行任意 SQL、不创建或管理账号。
 
 ## Dump
 

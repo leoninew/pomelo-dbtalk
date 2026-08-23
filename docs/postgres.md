@@ -1,10 +1,12 @@
 # PostgreSQL 手册
 
 `dbtalk postgres` 使用原生 `pg_dump` 和 `pg_restore` 创建、校验和恢复单个 PostgreSQL 数据库的
-custom archive。它不提供物理备份、WAL/PITR、`pg_dumpall` 或 cluster 全局 role/tablespace 恢复。
+custom archive，并可管理 PostgreSQL 数据库本身。它不提供物理备份、WAL/PITR、`pg_dumpall` 或 cluster
+全局 role/tablespace 恢复。
 
 ```powershell
 uv run dbtalk postgres --help
+uv run dbtalk postgres database --help
 uv run dbtalk postgres dump --help
 uv run dbtalk postgres restore --help
 ```
@@ -33,6 +35,23 @@ postgres:
 可用 `DBTALK_POSTGRES__CLIENT_IMAGE` 覆盖 image。不会安装客户端、拉取 image 或根据源库版本自动选择
 tag。PostgreSQL 18+ 是当前支持基线；`pg_dump` client 必须不低于源服务端 major，恢复目标通常不应低于
 备份来源。
+
+## Database management
+
+`database` 子命令只管理 PostgreSQL database，不执行任意 SQL、不管理 role，也不替代 dump/restore。管理
+DSN 必须连接到目标以外的维护库，通常为 `postgres`；账号还需要相应的建库或删库权限。
+
+```powershell
+$env:POSTGRES_MANAGEMENT_DSN = 'postgresql+psycopg://operator:password@db.example.com:5432/postgres'
+
+uv run dbtalk postgres database list --dsn-env POSTGRES_MANAGEMENT_DSN
+uv run dbtalk postgres database create --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db
+uv run dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --yes
+```
+
+`list` 输出非模板、可连接的数据库。`create` 使用服务端默认创建属性。`drop` 是不可逆操作，必须显式提供
+`--yes`，且不能删除管理 DSN 正在连接的数据库。存在其他连接、权限不足或服务器策略限制时，命令会失败；
+首版不会主动终止其他会话。
 
 ## Dump
 
