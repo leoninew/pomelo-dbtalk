@@ -31,6 +31,9 @@ mysqlrestore:
 database:
   zero_datetime_as_null: true
   operation_timeout_seconds: 30
+postgres:
+  output_directory: data
+  client_image: postgres:18
 """
 
 
@@ -60,6 +63,8 @@ def test_loads_yaml_settings(tmp_path: Path) -> None:
     assert settings.mysqlrestore.database == ""
     assert settings.database.zero_datetime_as_null is True
     assert settings.database.operation_timeout_seconds == 30
+    assert settings.postgres.output_directory == "data"
+    assert settings.postgres.client_image == "postgres:18"
     assert settings.logging.level == "INFO"
     assert settings.logging.format == "%(levelname)s %(name)s: %(message)s"
 
@@ -100,6 +105,15 @@ def test_database_operation_timeout_can_be_overridden(
     settings = load_settings(tmp_path)
 
     assert settings.database.operation_timeout_seconds == 15
+
+
+def test_postgres_client_image_can_be_overridden(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    write_settings(tmp_path)
+    monkeypatch.setenv("DBTALK_POSTGRES__CLIENT_IMAGE", "registry.example/postgres:19")
+
+    settings = load_settings(tmp_path)
+
+    assert settings.postgres.client_image == "registry.example/postgres:19"
 
 
 def write_settings(path: Path) -> None:

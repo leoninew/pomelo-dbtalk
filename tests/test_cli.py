@@ -15,6 +15,7 @@ def test_help_lists_database_command_groups() -> None:
 
     assert result.exit_code == 0
     assert "mysql" in result.output
+    assert "postgres" in result.output
     assert "database" in result.output
 
 
@@ -32,14 +33,18 @@ def test_root_command_displays_help() -> None:
     assert "Usage: cli" in result.output
 
 
-def test_mysql_and_database_help_are_available() -> None:
+def test_database_command_group_help_is_available() -> None:
     runner = CliRunner()
     mysql_result = runner.invoke(cli, ["mysql", "--help"])
+    postgres_result = runner.invoke(cli, ["postgres", "--help"])
     database_result = runner.invoke(cli, ["database", "--help"])
 
     assert mysql_result.exit_code == 0, mysql_result.output
     assert "dump" in mysql_result.output
     assert "restore" in mysql_result.output
+    assert postgres_result.exit_code == 0, postgres_result.output
+    assert "dump" in postgres_result.output
+    assert "restore" in postgres_result.output
     assert database_result.exit_code == 0, database_result.output
     assert "export" in database_result.output
     assert "import" in database_result.output

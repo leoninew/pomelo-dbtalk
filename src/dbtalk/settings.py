@@ -12,6 +12,7 @@ from dynaconf import Dynaconf
 
 DEFAULT_MYSQL_PORT = 3306
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 30
+DEFAULT_POSTGRES_CLIENT_IMAGE = "postgres:18"
 ENV_PREFIX = "DBTALK"
 ENV_SELECTOR = f"{ENV_PREFIX}_ENVKEY"
 
@@ -50,12 +51,19 @@ class DatabaseTransferConfig:
 
 
 @dataclass(frozen=True)
+class PostgresConfig:
+    output_directory: str
+    client_image: str
+
+
+@dataclass(frozen=True)
 class Settings:
     verbose: bool
     logging: LoggingSettings
     mysqldump: MySQLDumpConfig
     mysqlrestore: MySQLRestoreConfig
     database: DatabaseTransferConfig
+    postgres: PostgresConfig
 
 
 def default_project_root() -> Path:
@@ -80,6 +88,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
         mysqldump=load_mysql_dump_config(config.get("mysqldump")),
         mysqlrestore=load_mysql_restore_config(config.get("mysqlrestore")),
         database=load_database_transfer_config(config.get("database")),
+        postgres=load_postgres_config(config.get("postgres")),
     )
 
 
@@ -180,4 +189,20 @@ def load_database_transfer_config(value: Any) -> DatabaseTransferConfig:
     return DatabaseTransferConfig(
         zero_datetime_as_null=bool_config(config.get("zero_datetime_as_null", True)),
         operation_timeout_seconds=timeout_seconds,
+    )
+
+
+def load_postgres_config(value: Any) -> PostgresConfig:
+    config = mapping_config(value)
+    output_directory = config.get("output_directory", "data")
+    client_image = config.get("client_image", DEFAULT_POSTGRES_CLIENT_IMAGE)
+    assert isinstance(output_directory, str)
+    assert isinstance(client_image, str)
+    if not output_directory.strip():
+        raise ValueError("postgres.output_directory must not be empty")
+    if not client_image.strip():
+        raise ValueError("postgres.client_image must not be empty")
+    return PostgresConfig(
+        output_directory=output_directory,
+        client_image=client_image,
     )

@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "dbtalk"
 version = "0.1.0"
-description = "MySQL backup/restore and SQLite/MySQL JSONL transfer CLI."
+description = "MySQL and PostgreSQL backup/restore plus JSONL database transfer CLI."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

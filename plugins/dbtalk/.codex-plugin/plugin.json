@@ -1,7 +1,7 @@
 {
   "name": "dbtalk",
-  "version": "0.1.0",
-  "description": "MySQL dump and restore plus JSONL data transfer workflows for dbtalk.",
+  "version": "0.1.0+codex.20260823030839",
+  "description": "MySQL and PostgreSQL backup plus JSONL data transfer workflows for dbtalk.",
   "author": {
     "name": "Local developer"
   },
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "dbtalk",
     "shortDescription": "Operate dbtalk database workflows.",
-    "longDescription": "Provides dbtalk workflows for MySQL dump and restore, plus SQLite and MySQL JSONL data transfer.",
+    "longDescription": "Provides dbtalk workflows for MySQL and PostgreSQL backup and restore, plus JSONL data transfer.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [],
