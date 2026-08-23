@@ -1,12 +1,13 @@
 ---
 name: dbtalk-postgres
-description: 使用 dbtalk postgres 管理 PostgreSQL database，或创建和恢复单库 custom archive。用户要求 PostgreSQL database create/drop/list、backup、dump、restore 时使用。
+description: 使用 dbtalk postgres 管理 PostgreSQL database、role、固定 profile 授权，或创建和恢复单库 custom archive。用户要求 PostgreSQL database create/drop/list、role、授权、backup、dump、restore 时使用。
 ---
 
 # dbtalk PostgreSQL
 
-使用 `dbtalk postgres` 管理 PostgreSQL database，或处理单个 PostgreSQL 数据库的 native logical
-dump 和 restore。它创建并消费 `pg_dump --format=custom` archive，不用于 JSONL 数据传输、物理备份、WAL/PITR、role 或 tablespace。
+使用 `dbtalk postgres` 管理 PostgreSQL database、role、固定 profile 授权，或处理单个数据库的 native logical
+dump 和 restore。它创建并消费 `pg_dump --format=custom` archive，不用于 JSONL 数据传输、物理备份、WAL/PITR
+或 tablespace。
 
 先确认可用参数：
 
@@ -69,3 +70,20 @@ uv run dbtalk postgres restore --dsn-env APP_DSN --input .\data\app.dump
 
 restore 在写入前用 `pg_restore --list` 校验 archive。即使启用 fail-fast，restore 也不能整体回滚；完成后
 确认命令成功退出，并按需检查代表性对象和数据。
+
+## Role 与授权
+
+先查看命令帮助：
+
+```powershell
+uv run dbtalk postgres role --help
+uv run dbtalk postgres grant --help
+```
+
+role 管理和 grant/revoke 使用管理 DSN。新 role 默认没有超级用户、建库、建 role、复制或绕过 RLS 能力；
+密码只能通过 `--password-env NAME` 引用。grant/revoke 只接受 `--database` 或 `--schema` 之一，以及固定的
+`read-only` / `read-write` profile；不接受 table、sequence、function、role membership 或原始权限 SQL。
+
+schema profile 仅作用于当前对象，不能替代 default privileges。执行启用、禁用、轮换密码、删除、授权或撤销前，
+必须确认目标和写入授权，并传入 `--yes`。不要修改当前管理 role，也不要把 profile 扩展为 `WITH GRANT OPTION`
+或高危系统权限。

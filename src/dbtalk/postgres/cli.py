@@ -15,6 +15,7 @@ from .client import PostgresConnection
 from .database import database as database_management
 from .dump import PostgresDumpOptions, dump_database, resolve_dump_options
 from .restore import PostgresRestoreOptions, restore_database
+from .role import grant_command, revoke_command, role
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
@@ -34,6 +35,9 @@ def postgres() -> None:
 
 
 postgres.add_command(database_management)
+postgres.add_command(role)
+postgres.add_command(grant_command)
+postgres.add_command(revoke_command)
 
 
 @postgres.command("dump", context_settings=CONTEXT_SETTINGS)

@@ -1,11 +1,11 @@
 ---
 name: dbtalk-mysql
-description: 使用 dbtalk mysql 管理 MySQL database，或导出和恢复 mysqldump SQL 文件。用户要求 MySQL database create/drop/list、backup、dump、restore 或导入 .sql 时使用。
+description: 使用 dbtalk mysql 管理 MySQL database、user、固定 profile 授权，或导出和恢复 mysqldump SQL 文件。用户要求 MySQL database create/drop/list、用户、授权、backup、dump、restore 或导入 .sql 时使用。
 ---
 
 # dbtalk MySQL
 
-使用 `dbtalk mysql` 管理 MySQL database，或处理原生 SQL dump 和 restore。dump/restore 优先使用本机的
+使用 `dbtalk mysql` 管理 MySQL database、user、固定 profile 授权，或处理原生 SQL dump 和 restore。dump/restore 优先使用本机的
 `mysqldump` 或 `mysql`；本机客户端缺失时，只能回退到本机已有的 Docker `mysql` 镜像。不要安装客户端、
 拉取镜像或替换为其他备份工具。
 
@@ -73,3 +73,20 @@ restore 会覆盖或删除 dump 中同名表及数据，不能整体回滚。完
 - Docker 回退连接本机数据库时使用 `host.docker.internal`；不要改成容器内的 `localhost`。
 - Docker daemon 不可用或本地没有 `mysql` 镜像时，如实报告并停止；不要自动重试、拉取镜像、创建目标库或停止其他容器。
 - dump 和 restore 没有内建超时。大文件操作仅按用户指定频率检查状态，不要中断仍在执行的 restore。
+
+## User 与授权
+
+先查看命令帮助：
+
+```powershell
+uv run dbtalk mysql user --help
+uv run dbtalk mysql grant --help
+```
+
+user 管理和 grant/revoke 需要完整管理 DSN。密码只能通过 `--password-env NAME` 引用，不得作为 CLI 值或
+输出内容。MySQL user 必须提供精确的 `--user` 和 `--host`；仅支持 `localhost`、单个 DNS 名称、IPv4 或
+IPv6，不允许 `%`、`_` 或其他通配 host。
+
+grant/revoke 仅支持单个 `--database` 与 `read-only` / `read-write` profile。执行启用、禁用、轮换密码、删除、
+授权或撤销前，必须确认目标、资源、profile 和写入权限，并传入 `--yes`。不要修改当前管理 account，不要
+用这些命令传入原始 `GRANT`/`REVOKE` SQL，也不要扩大到全局、表级或任意 privilege。

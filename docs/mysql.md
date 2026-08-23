@@ -88,3 +88,27 @@ uv run dbtalk mysql restore `
 
 `dbtalk` 优先使用本机 `mysqldump` 或 `mysql` 可执行文件。缺失时才使用本机已有的 Docker `mysql` 镜像；
 不会安装客户端、拉取镜像、创建数据库或自动重试。
+
+## 用户与授权
+
+`dbtalk mysql user` 管理 MySQL `username@host` account；`dbtalk mysql grant` 和 `revoke` 与 user 命令
+同级。所有管理命令使用管理 DSN，且必须在 `--dsn` 和 `--dsn-env` 间二选一。
+
+```powershell
+$env:MYSQL_ADMIN_DSN = 'mysql+pymysql://admin:password@db.example:3306/app'
+$env:APP_PASSWORD = 'application-password'
+
+uv run dbtalk mysql user create --dsn-env MYSQL_ADMIN_DSN `
+  --user app_user --host app.example --password-env APP_PASSWORD
+uv run dbtalk mysql grant --dsn-env MYSQL_ADMIN_DSN `
+  --user app_user --host app.example --database app --profile read-write --yes
+```
+
+MySQL user 必须显式提供一个精确 host：`localhost`、单个 DNS 名称、IPv4 或 IPv6。`%`、`_` 和其他通配
+host 均被拒绝。密码只能通过 `--password-env` 引用的环境变量输入；不会显示在命令输出、日志或错误中。
+
+授权只支持单个数据库及固定 profile：`read-only` 授予 `SELECT, SHOW VIEW`，`read-write` 额外授予
+`INSERT, UPDATE, DELETE`。不支持全局、表级、列级、任意 privilege 文本或 `WITH GRANT OPTION`。
+
+启用、禁用、轮换密码、删除、授权和撤销都要求 `--yes`，并拒绝修改当前管理 account。创建和授权不会隐式
+赋予其他权限；撤销 profile 可能中断使用该 account 的应用连接。

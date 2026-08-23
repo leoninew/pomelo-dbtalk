@@ -96,3 +96,30 @@ archive 来源和写入授权。
 常规 logical dump 包含单库中的 schema、表数据、索引、约束、序列、视图、函数和 extension 声明。
 它不备份 cluster 全局 role、role password、tablespace 或实例配置；跨环境恢复还要求目标实例具备兼容的
 extension 与客户端版本。需要全量 cluster 灾备或时间点恢复时，应使用独立的 PostgreSQL 物理备份方案。
+
+## Role 与授权
+
+`dbtalk postgres role` 管理具备 `LOGIN` 的 PostgreSQL role；`dbtalk postgres grant` 和 `revoke` 与 role
+命令同级。所有管理命令使用管理 DSN，且必须在 `--dsn` 和 `--dsn-env` 间二选一。
+
+```powershell
+$env:POSTGRES_ADMIN_DSN = 'postgresql+psycopg://admin:password@db.example:5432/app'
+$env:APP_PASSWORD = 'application-password'
+
+uv run dbtalk postgres role create --dsn-env POSTGRES_ADMIN_DSN `
+  --role app_role --password-env APP_PASSWORD
+uv run dbtalk postgres grant --dsn-env POSTGRES_ADMIN_DSN `
+  --role app_role --schema app --profile read-write --yes
+```
+
+新 role 默认是 `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`。密码只能通过
+`--password-env` 引用的环境变量输入；不会显示在命令输出、日志或错误中。
+
+授权目标仅支持 database 或 schema。`read-only` database profile 授予 `CONNECT`；`read-write` 额外授予
+`TEMPORARY`。schema 的 `read-only` profile 授予 `USAGE` 和当前所有表的 `SELECT`；`read-write` 额外授予
+当前所有表的 `INSERT, UPDATE, DELETE`，以及当前序列的 `USAGE, SELECT, UPDATE`。命令不会修改 default
+privileges，因此不会自动覆盖未来创建的表或序列。
+
+不支持独立 table、sequence、function 目标、DDL 权限、role membership、`WITH GRANT OPTION` 或任意
+privilege 文本。启用、禁用、轮换密码、删除、授权和撤销都要求 `--yes`，并拒绝修改当前管理 role；撤销
+profile 可能中断应用访问。

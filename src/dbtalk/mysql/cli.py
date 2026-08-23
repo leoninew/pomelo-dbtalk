@@ -28,6 +28,7 @@ from .restore import (
     resolve_restore_options,
     restore_database,
 )
+from .user import grant_command, revoke_command, user
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
@@ -57,6 +58,9 @@ def mysql() -> None:
 
 
 mysql.add_command(database_management)
+mysql.add_command(user)
+mysql.add_command(grant_command)
+mysql.add_command(revoke_command)
 
 
 @mysql.command("dump", context_settings=CONTEXT_SETTINGS)
