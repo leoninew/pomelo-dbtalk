@@ -5,16 +5,17 @@ description: 使用 dbtalk mysql 管理 MySQL database、user、固定 profile �
 
 # dbtalk MySQL
 
-使用 `dbtalk mysql` 管理 MySQL database、user、固定 profile 授权，或处理原生 SQL dump 和 restore。dump/restore 优先使用本机的
+使用 `dbtalk mysql` 管理 MySQL database、user、固定 profile 授权，或处理原生 SQL dump 和 restore。要求发布安装的
+`dbtalk` 可执行文件位于 `PATH` 中。dump/restore 优先使用本机的
 `mysqldump` 或 `mysql`；本机客户端缺失时，只能回退到本机已有的 Docker `mysql` 镜像。不要安装客户端、
 拉取镜像或替换为其他备份工具。
 
 先确认可用参数：
 
 ```powershell
-uv run dbtalk mysql dump --help
-uv run dbtalk mysql restore --help
-uv run dbtalk mysql database --help
+dbtalk mysql dump --help
+dbtalk mysql restore --help
+dbtalk mysql database --help
 ```
 
 ## 配置与凭据
@@ -34,9 +35,9 @@ APP_DSN=mysql+pymysql://user:password@host:3306/database
 必须指向一个已有 MySQL 数据库，并使用具有相应数据库管理权限的账号。
 
 ```powershell
-uv run dbtalk mysql database list --dsn-env MYSQL_MANAGEMENT_DSN
-uv run dbtalk mysql database create --dsn-env MYSQL_MANAGEMENT_DSN --name app_db
-uv run dbtalk mysql database drop --dsn-env MYSQL_MANAGEMENT_DSN --name app_db --yes
+dbtalk mysql database list --dsn-env MYSQL_MANAGEMENT_DSN
+dbtalk mysql database create --dsn-env MYSQL_MANAGEMENT_DSN --name app_db
+dbtalk mysql database drop --dsn-env MYSQL_MANAGEMENT_DSN --name app_db --yes
 ```
 
 先执行 `list` 核对目标。创建后只报告数据库名。删除不可逆，只有用户明确授权删除指定目标时才传入
@@ -47,8 +48,8 @@ uv run dbtalk mysql database drop --dsn-env MYSQL_MANAGEMENT_DSN --name app_db -
 dump 需要完整的 MySQL DSN。未传 `--output` 时，输出默认为当前目录的 `data/<database>-<timestamp>.sql`，并会自动创建配置的输出目录。显式传入 `--output` 且路径是已有目录时，也会在其中生成同样的时间戳文件。其他路径视为文件，父目录必须已存在；不存在的路径不会被推断为目录或自动创建。
 
 ```powershell
-uv run dbtalk mysql dump --dsn-env APP_DSN --output .\data\app.sql
-uv run dbtalk mysql dump --dsn-env APP_DSN --output .\data\app.sql --archive
+dbtalk mysql dump --dsn-env APP_DSN --output .\data\app.sql
+dbtalk mysql dump --dsn-env APP_DSN --output .\data\app.sql --archive
 ```
 
 `--archive` 写入 `.sql.gz`；输出路径没有 `.gz` 后缀时会自动追加。`--create-database` 和 `--drop-database` 分别包含 `CREATE DATABASE` 和 `DROP DATABASE`。非本机 MySQL host 使用连接压缩；`localhost` 与 `127.0.0.1` 不使用该参数。
@@ -60,7 +61,7 @@ uv run dbtalk mysql dump --dsn-env APP_DSN --output .\data\app.sql --archive
 restore 需要已有的 `.sql` 或 `.sql.gz` 文件，以及完整的 MySQL DSN。目标库必须已存在，除非 SQL 文件本身会创建它。
 
 ```powershell
-uv run dbtalk mysql restore --dsn-env APP_DSN --input .\data\app-20260820-120000.sql.gz
+dbtalk mysql restore --dsn-env APP_DSN --input .\data\app-20260820-120000.sql.gz
 ```
 
 只有在目标连接、目标库、输入文件来源和写入授权已明确时才能执行 restore。若 dump 含有源数据库的 `CREATE DATABASE`、`DROP DATABASE` 或 `USE`，通过 `--database <target>` 显式指定目标库；命令会在临时输入中跳过源库数据库 DDL 并重写 `USE`，不会修改原始 dump 文件。
@@ -79,8 +80,8 @@ restore 会覆盖或删除 dump 中同名表及数据，不能整体回滚。完
 先查看命令帮助：
 
 ```powershell
-uv run dbtalk mysql user --help
-uv run dbtalk mysql grant --help
+dbtalk mysql user --help
+dbtalk mysql grant --help
 ```
 
 user 管理和 grant/revoke 需要完整管理 DSN。密码只能通过 `--password-env NAME` 引用，不得作为 CLI 值或

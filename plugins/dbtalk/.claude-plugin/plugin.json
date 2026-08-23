@@ -1,0 +1,8 @@
+{
+  "name": "dbtalk",
+  "version": "0.1.0",
+  "description": "MySQL and PostgreSQL management, backup, and JSONL data transfer workflows for dbtalk.",
+  "author": {
+    "name": "Local developer"
+  }
+}

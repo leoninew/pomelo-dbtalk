@@ -7,14 +7,14 @@ description: 使用 dbtalk postgres 管理 PostgreSQL database、role、固定 p
 
 使用 `dbtalk postgres` 管理 PostgreSQL database、role、固定 profile 授权，或处理单个数据库的 native logical
 dump 和 restore。它创建并消费 `pg_dump --format=custom` archive，不用于 JSONL 数据传输、物理备份、WAL/PITR
-或 tablespace。
+或 tablespace。要求发布安装的 `dbtalk` 可执行文件位于 `PATH` 中。
 
 先确认可用参数：
 
 ```powershell
-uv run dbtalk postgres dump --help
-uv run dbtalk postgres restore --help
-uv run dbtalk postgres database --help
+dbtalk postgres dump --help
+dbtalk postgres restore --help
+dbtalk postgres database --help
 ```
 
 ## 连接与客户端
@@ -37,9 +37,9 @@ $env:APP_DSN = 'postgresql+psycopg://backup:password@db.example.com:5432/app'
 DSN 必须连接到目标以外的维护库，通常为 `postgres`，并使用具有建库或删库权限的账号。
 
 ```powershell
-uv run dbtalk postgres database list --dsn-env POSTGRES_MANAGEMENT_DSN
-uv run dbtalk postgres database create --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db
-uv run dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --yes
+dbtalk postgres database list --dsn-env POSTGRES_MANAGEMENT_DSN
+dbtalk postgres database create --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db
+dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --yes
 ```
 
 先执行 `list` 核对目标。删除不可逆，只有用户明确授权删除指定目标时才传入 `--yes`；不能删除管理 DSN
@@ -49,8 +49,8 @@ uv run dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name ap
 ## Dump
 
 ```powershell
-uv run dbtalk postgres dump --dsn-env APP_DSN --output .\data\app.dump
-uv run dbtalk postgres dump --dsn-env APP_DSN --compression-level 6
+dbtalk postgres dump --dsn-env APP_DSN --output .\data\app.dump
+dbtalk postgres dump --dsn-env APP_DSN --compression-level 6
 ```
 
 dump 只输出 custom `.dump` archive，默认在 `postgres.output_directory` 中生成带时间戳的文件。archive
@@ -61,7 +61,7 @@ dump 只输出 custom `.dump` archive，默认在 `postgres.output_directory` �
 restore 会修改目标数据库。只有目标 DSN、输入 archive 来源和写入授权均已明确时才能执行：
 
 ```powershell
-uv run dbtalk postgres restore --dsn-env APP_DSN --input .\data\app.dump
+dbtalk postgres restore --dsn-env APP_DSN --input .\data\app.dump
 ```
 
 目标数据库必须已经存在。默认跳过 archive 中的 owner 和 ACL；需要保留时传入
@@ -76,8 +76,8 @@ restore 在写入前用 `pg_restore --list` 校验 archive。即使启用 fail-f
 先查看命令帮助：
 
 ```powershell
-uv run dbtalk postgres role --help
-uv run dbtalk postgres grant --help
+dbtalk postgres role --help
+dbtalk postgres grant --help
 ```
 
 role 管理和 grant/revoke 使用管理 DSN。新 role 默认没有超级用户、建库、建 role、复制或绕过 RLS 能力；

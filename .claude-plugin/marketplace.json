@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "dbtalk-local",
+  "description": "Local dbtalk database workflow plugins.",
+  "owner": {
+    "name": "Local developer"
+  },
+  "metadata": {
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "dbtalk",
+      "description": "MySQL and PostgreSQL management, backup, and JSONL data transfer workflows for dbtalk.",
+      "author": {
+        "name": "Local developer"
+      },
+      "source": "./plugins/dbtalk",
+      "category": "database"
+    }
+  ]
+}

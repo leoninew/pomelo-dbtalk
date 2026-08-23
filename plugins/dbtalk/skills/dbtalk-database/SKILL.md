@@ -5,6 +5,8 @@ description: 使用 dbtalk database 或 dbtalk mysql 通过明确 DSN 执行数�
 
 # dbtalk Database
 
+要求发布安装的 `dbtalk` 可执行文件位于 `PATH` 中。
+
 所有数据库命令都必须接收一个完整 DSN，或接收 `--dsn-env NAME` 从环境变量读取 DSN；二者不能同时
 提供，也不能省略。不要使用 `sqlite-file`、`--sqlite-path`、`--mysql-dsn-env` 或无 driver 的 DSN。
 
@@ -22,7 +24,7 @@ postgresql+psycopg://user:password@host:5432/database
 ## Query / Exec
 
 ```powershell
-uv run dbtalk database query `
+dbtalk database query `
   --dsn 'sqlite:///./data/app.db' `
   --timeout 30 `
   --sql 'SELECT id, name FROM users WHERE id = :id' `
@@ -30,7 +32,7 @@ uv run dbtalk database query `
   --format json
 
 $env:APP_DSN = 'sqlite:///./data/app.db'
-uv run dbtalk database exec `
+dbtalk database exec `
   --write `
   --dsn-env APP_DSN `
   --timeout 30 `
@@ -53,12 +55,12 @@ MySQL 分别使用其原生会话或驱动机制。MySQL 写入超时后不保�
 
 ```powershell
 $env:SOURCE_DSN = 'postgresql+psycopg://user:password@host:5432/source_db'
-uv run dbtalk database export `
+dbtalk database export `
   --source postgresql `
   --dsn-env SOURCE_DSN `
   --output .\data\source.jsonl
 
-uv run dbtalk database import `
+dbtalk database import `
   --target postgresql `
   --dsn 'postgresql+psycopg://user:password@host:5432/target_db' `
   --input .\data\source.jsonl `
@@ -73,11 +75,11 @@ SQLite、MySQL、PostgreSQL 的 export/import 均通过 SQLAlchemy Core adapter 
 原生 `mysqldump`/`mysql` 仍由 `dbtalk mysql` 执行，但连接同样只能通过 DSN 或 DSN 环境变量提供：
 
 ```powershell
-uv run dbtalk mysql dump `
+dbtalk mysql dump `
   --dsn 'mysql+pymysql://user:password@host:3306/database' `
   --output .\data\backup.sql
 
-uv run dbtalk mysql restore `
+dbtalk mysql restore `
   --dsn-env SOURCE_DSN `
   --input .\data\backup.sql
 ```

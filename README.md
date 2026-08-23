@@ -56,6 +56,29 @@ DSN 写入进程参数；不支持无 driver 的数据库 URL 或数据库类型
 
 SQL 和 JSONL 制品应放在被 Git 忽略的 `data/` 或其他受控目录。
 
+## 本地发布
+
+`make release` 严格依次执行 `scripts/release.py plugin check`、`pip install -e .` 和
+`scripts/release.py plugin apply`。plugin 子命令通过已安装的 Codex、Claude、Grok CLI 各自的 plugin 安装器更新仓库
+marketplace 中的 plugin。自动模式跳过缺失的部分宿主；三个宿主均不存在时会在 CLI 安装和宿主写操作前失败。预览而不写入时使用：
+
+```powershell
+python scripts/release.py plugin apply --dry-run
+```
+
+使用 `--codex` 选择宿主，或使用 `--strict` 要求三个宿主都可用。`release.py` 的显式入口为 `plugin check`、
+`plugin list`、`plugin apply` 和 `plugin remove`；无参数等同于 `--help`。同步器以宿主 CLI 的 JSON 状态精确识别
+marketplace 和 plugin；dry-run 仍会执行只读预检和计划，不会写入用户目录。
+
+该命令不手工复制 skill 到 `~/.codex/skills`、`~/.claude/skills` 或 `~/.grok`，由插件安装器管理其受管目录。
+发布后的 plugin 需要 `dbtalk` 位于 `PATH`。同步引擎完整 vendored 在
+[`scripts/release.py`](scripts/release.py)，项目只在文件顶部声明 plugin 包和 marketplace；不依赖外部同步包或
+项目外的绝对路径。仓库没有 standalone skill，因此 `skill` 子命令会明确报告未配置，不会把 plugin skill
+镜像到任一宿主的普通 `skills/` 目录。
+
+同步器只通过宿主原生 CLI 管理 plugin：自动模式跳过未安装的宿主 CLI，显式 `--claude`、`--codex`、`--grok`
+或 `--strict` 会在任何写入前失败。`check`、`list` 和 `--dry-run` 无写入；实际运行可能逐宿主产生部分成功，结果会逐项报告。
+
 ## 测试
 
 ```powershell
