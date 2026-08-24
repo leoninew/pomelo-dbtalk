@@ -6,17 +6,19 @@ description: 使用 dbtalk mysql 管理 MySQL database、user、固定 profile �
 # dbtalk MySQL
 
 使用 `dbtalk mysql` 管理 MySQL database、user、固定 profile 授权，或处理原生 SQL dump 和 restore。要求发布安装的
-`dbtalk` 可执行文件位于 `PATH` 中。dump/restore 优先使用本机的
-`mysqldump` 或 `mysql`；本机客户端缺失时，只能回退到本机已有的 Docker `mysql` 镜像。不要安装客户端、
-拉取镜像或替换为其他备份工具。
+`dbtalk` 可执行文件位于 `PATH` 中。
 
-先确认可用参数：
+## Dump 执行语义
 
-```powershell
-dbtalk mysql dump --help
-dbtalk mysql restore --help
-dbtalk mysql database --help
-```
+`dbtalk mysql dump` 在**调用命令的当前执行机**运行：它调用该机器上的 `mysqldump`，本机客户端缺失时才
+回退到该机器已有的 Docker `mysql` 镜像。MySQL 服务器不需要安装 dbtalk。
+
+DSN 的 host 也从当前执行机解释。`localhost` 或 `127.0.0.1` 指向当前执行机本身；不要仅因数据库被称为
+“远端”就更换命令执行位置或推断额外前置条件。一次 SQL dump 请求只授权执行该 dump；不应由此改变执行位置、
+配置连接路径或安排其他连接方式。当前执行机拥有可用 DSN 时，直接运行 `dbtalk mysql dump`。连接或客户端失败时，
+报告 dbtalk 的失败结果并停止；不要将失败自行扩展为其他连接方案。
+
+不要安装客户端、拉取镜像或替换为其他备份工具。
 
 ## 配置与凭据
 
@@ -48,6 +50,9 @@ dbtalk mysql database drop --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN --name app_db -
 ## Dump
 
 dump 需要完整的 MySQL DSN。未传 `--output` 时，输出默认为当前目录的 `data/<database>-<timestamp>.sql`，并会自动创建配置的输出目录。显式传入 `--output` 且路径是已有目录时，也会在其中生成同样的时间戳文件。其他路径视为文件，父目录必须已存在；不存在的路径不会被推断为目录或自动创建。
+
+`dump` 是 MySQL 原生 SQL 备份入口；不要用 `dbtalk database export` 代替它。只有用户同时要求 JSONL 数据
+导出时，才额外运行 `dbtalk database export`。
 
 ```powershell
 dbtalk mysql dump --dsn-env DBTALK_APP_DSN --output .\data\app.sql

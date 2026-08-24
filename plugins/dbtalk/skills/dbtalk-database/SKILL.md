@@ -1,13 +1,13 @@
 ---
 name: dbtalk-database
-description: 使用 dbtalk database 或 dbtalk mysql 通过明确 DSN 执行数据库查询、写入、JSONL 传输和 MySQL 原生备份还原。
+description: 使用 dbtalk database 通过明确 DSN 执行通用 SQL 查询、写入及 JSONL 数据导入导出。
 ---
 
 # dbtalk Database
 
 要求发布安装的 `dbtalk` 可执行文件位于 `PATH` 中。
 
-所有数据库命令都必须接收一个完整 DSN，或接收 `--dsn-env NAME` 从环境变量读取 DSN；二者不能同时
+所有 `dbtalk database` 命令都必须接收一个完整 DSN，或接收 `--dsn-env NAME` 从环境变量读取 DSN；二者不能同时
 提供，也不能省略。不要使用 `sqlite-file`、`--sqlite-path`、`--mysql-dsn-env` 或无 driver 的 DSN。
 对于 `--dsn-env DBTALK_*`，dbtalk 先使用同名进程环境变量；变量不存在时才从当前目录 `.env` 读取同名值。
 非 `DBTALK_*` 名称仅从进程环境读取。
@@ -75,20 +75,3 @@ dbtalk database import `
 
 SQLite、MySQL、PostgreSQL 的 export/import 均通过 SQLAlchemy Core adapter 执行；不要根据数据库类型
 切换到另一套 transfer API。目标 schema 必须预先存在，`upsert` 需要完整主键，工具不会创建 schema。
-
-## MySQL Backup / Restore
-
-原生 `mysqldump`/`mysql` 仍由 `dbtalk mysql` 执行，但连接同样只能通过 DSN 或 DSN 环境变量提供：
-
-```powershell
-dbtalk mysql dump `
-  --dsn 'mysql+pymysql://user:password@host:3306/database' `
-  --output .\data\backup.sql
-
-dbtalk mysql restore `
-  --dsn-env DBTALK_SOURCE_DSN `
-  --input .\data\backup.sql
-```
-
-不要在命令行、skill、日志或 JSONL 制品中暴露真实密码。`dump`/`restore` 不接受 host、port、user、
-password、database 分散参数，也不接受 Go 风格 DSN。
