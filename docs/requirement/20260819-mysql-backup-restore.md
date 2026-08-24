@@ -6,7 +6,7 @@ Stage: Requirement
 
 # MySQL 备份与导入需求
 
-最后修改时间: 2026-08-20 15:31:55
+最后修改时间: 2026-08-24
 
 ## 迁移说明
 
@@ -16,7 +16,8 @@ Stage: Requirement
 
 - `dbtalk mysql dump` 接收已提供的 MySQL 连接信息后实际执行导出，而非仅打印命令。
 - 优先使用本机可执行的 `mysqldump`。
-- 本机没有 `mysqldump` 时，检查 Docker CLI 和本地可用的 `mysql` 镜像；满足条件时在临时容器中执行 `mysqldump`，再将 SQL 文件复制到宿主机。
+- 本机没有 `mysqldump` 且 DSN 指向 `localhost` 或 `127.0.0.1` 时，先查询 Docker：仅当请求端口筛选出唯一运行中的容器，才在该容器中通过默认 Unix socket 执行 `mysqldump`，并将 SQL 文件复制到宿主机。
+- 未识别到唯一运行中的本机容器时，检查 Docker CLI 和本地可用的 `mysql` 镜像；满足条件时在临时容器中执行 `mysqldump`，再将 SQL 文件复制到宿主机。
 - 未传递 `--output` 时，将导出文件写入当前目录的 `data/`，默认文件名为 `<database>-<timestamp>.sql`；目录不存在时自动创建。
 - 传递 `--output` 且路径是已有目录时，在该目录生成同样命名规则的 dump；路径不存在或是已有文件时，将其视为文件路径，且其父目录必须已经存在。
 - 将 MySQL 连接参数和默认导出选项集中到 `mysqldump` 配置组；CLI 参数可覆盖配置值。
@@ -33,7 +34,8 @@ Stage: Requirement
 ## Acceptance
 
 - 本机存在 `mysqldump` 时直接调用，并使用环境变量传递密码。
-- 本机无 `mysqldump` 时，Docker 回退仅使用本地已有的 `mysql` 镜像。
+- 本机无 `mysqldump` 且 DSN 为本机地址时，如 Docker 对请求端口仅返回一个运行中容器，优先在该容器内执行 `mysqldump`；调用不传 `-h`、`-P` 或 `-C`，并在复制到宿主机后清理容器内临时 SQL 文件。
+- 无法唯一识别本机容器或 DSN 为非本机地址时，Docker 回退仅使用本地已有的 `mysql` 镜像。
 - Docker 回退完成后将 dump 文件写入用户指定路径，并清理临时容器。
 - Docker 回退能将默认本机地址映射到容器可访问的宿主机地址。
 - 未给 `--output` 时创建当前目录下的 `data/`，并在其中生成 `<database>-<timestamp>.sql`。
@@ -51,6 +53,7 @@ Stage: Requirement
 ## Risk
 
 - Docker 回退依赖 Docker daemon 可用、MySQL 镜像已在本地且容器网络能到达目标数据库。
+- 容器内 dump 路径仅基于 Docker 对请求端口的运行中容器筛选；多个匹配、Docker 不可用或筛选失败时必须回退到既有临时客户端路径，不能猜测容器。
 - Docker 不可用的具体原因由 Docker CLI 的退出状态决定；CLI 仅报告本机可识别的原因，不会自动修复 Docker 环境。
 - 数据库连接或权限错误应直接报错，不应掩盖为 Docker 回退问题。
 - 导入 SQL 会直接修改目标数据库；调用方必须确认目标连接信息、SQL 来源和其中的 DDL/DML 内容。

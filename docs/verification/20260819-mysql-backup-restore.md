@@ -6,11 +6,54 @@ Stage: Verification
 
 # MySQL 备份与导入验证
 
-最后修改时间: 2026-08-20 15:23:00
+最后修改时间: 2026-08-24
 
 ## 迁移说明
 
-本文是原 `housekeeper` 实现于 2026-08-19 的历史验证记录，迁入此处用于保留 MySQL dump/restore 的设计与执行证据。下文的模块路径、环境变量前缀、测试数量、真实数据库制品和结论都属于原项目；它不声明 `dbtalk` 已完成相同验证。`dbtalk` 的独立验证应在当前工作树和当前环境中重新执行，并另行记录。
+本文保留原 `housekeeper` 实现于 2026-08-19 的历史验证记录，用于保存 MySQL dump/restore 的初始设计与执行证据。原记录中的模块路径、环境变量前缀、测试数量、真实数据库制品和结论均属于原项目；它们不声明 `dbtalk` 已完成相同验证。本次 `dbtalk` 的独立验证结果追加在下文“2026-08-24 dbtalk 验证更新”中。
+
+## 2026-08-24 dbtalk 验证更新
+
+### 需求对齐
+
+- `dbtalk mysql dump` 仍优先调用本机 `mysqldump`。
+- 本机客户端缺失且 DSN 为 `localhost` 或 `127.0.0.1` 时，Docker 对请求端口仅筛选出一个运行中容器才会进入该容器执行 `mysqldump`；该调用使用默认 Unix socket，不传 `-h`、`-P` 或 `-C`。
+- 容器 dump 成功后以 `docker cp` 写入请求的宿主机路径，并在 `finally` 中删除容器内临时 SQL 文件。
+- 容器无法唯一识别、Docker 命令失败或 DSN 为非本机地址时，保留既有本地 Docker `mysql` 镜像临时客户端回退；不会安装客户端、拉取镜像或猜测容器。
+
+### 实际 Diff 摘要
+
+- `src/dbtalk/mysql/dump.py` 增加本机端口的运行中容器发现，以及容器内 `mysqldump`、复制制品和清理临时 SQL 文件的执行路径。
+- `tests/test_mysql.py` 覆盖优先级、socket 参数、省略密码参数、复制与清理、唯一与歧义匹配、Docker 启动失败。
+- `docs/mysql.md` 与 MySQL plugin skill 说明容器内 socket 路径、临时客户端回退和不猜测容器的边界。
+
+### 验收清单
+
+- [x] 本机 `mysqldump` 优先于全部 Docker 路径。
+- [x] 本机客户端缺失且唯一运行中容器匹配时，容器内 dump 不传 `-h`、`-P` 或 `-C`，密码通过 `MYSQL_PWD` 传递。
+- [x] 成功路径复制 dump 到宿主机，并尝试清理容器内临时文件。
+- [x] 歧义容器匹配和 Docker 启动失败不会选择容器。
+- [x] 无容器路径时保留本地 Docker `mysql` 镜像回退；远端 DSN 不进行本机容器发现。
+- [x] 面向用户的手册和 MySQL skill 已说明执行顺序与故障处理边界。
+
+### 命令结果
+
+- `git diff --cached --check`：通过。
+- `uv run pytest tests/test_mysql.py --no-cov -q`：`28 passed`。
+- `uv run pytest -q`：`177 passed, 1 skipped`，分支覆盖率 `90.04%`。
+- `uv run ruff check .`：通过。
+- `uv run ruff format --check .`：`95 files already formatted`。
+- `uv run mypy src tests`：通过，`58 source files` 无类型错误。
+- `uv run python scripts/test_release.py`：`10 tests`，`OK`。
+
+### 风险与未完成项
+
+- 本次未提供真实 Docker MySQL 容器和隔离数据库，容器发现、socket dump、`docker cp` 与清理由 subprocess mock 测试覆盖；既有手工集成测试仍因未设置 `DBTALK_RUN_INTEGRATION=1` 跳过。
+- Docker 筛选到多个容器或 Docker daemon 不可用时会保守回退，不会为发现容器而启动、停止或修改任何容器。
+
+### 当前结论
+
+当前 `dbtalk` 工作树的专项测试、全量测试、静态检查和发布脚本测试均通过。自动化验证支持交付本次执行路径；真实 Docker MySQL 端口映射的端到端验证保留为后续在用户授权环境中的集成检查。
 
 ## 需求对齐
 

@@ -10,13 +10,9 @@ description: 使用 dbtalk mysql 管理 MySQL database、user、固定 profile �
 
 ## Dump 执行语义
 
-`dbtalk mysql dump` 在**调用命令的当前执行机**运行：它调用该机器上的 `mysqldump`，本机客户端缺失时才
-回退到该机器已有的 Docker `mysql` 镜像。MySQL 服务器不需要安装 dbtalk。
+`dbtalk mysql dump` 优先调用当前机器上的 `mysqldump`。本机客户端缺失且 DSN 指向调用机的 `localhost` 或 `127.0.0.1` 时，若该发布端口唯一对应一个运行中的 Docker 容器，`dbtalk` 直接在该容器中运行 `mysqldump`，默认通过 Unix socket 连接，并将 SQL 文件复制到调用机指定的输出路径。无法唯一识别容器时，才回退到该机器已有的 Docker `mysql` 镜像。MySQL 服务器不需要安装 dbtalk。
 
-DSN 的 host 也从当前执行机解释。`localhost` 或 `127.0.0.1` 指向当前执行机本身；不要仅因数据库被称为
-“远端”就更换命令执行位置或推断额外前置条件。一次 SQL dump 请求只授权执行该 dump；不应由此改变执行位置、
-配置连接路径或安排其他连接方式。当前执行机拥有可用 DSN 时，直接运行 `dbtalk mysql dump`。连接或客户端失败时，
-报告 dbtalk 的失败结果并停止；不要将失败自行扩展为其他连接方案。
+DSN 的 host 从当前执行机解释。`localhost` 或 `127.0.0.1` 指向当前执行机本身；只有 Docker 明确显示该端口唯一映射到运行中容器时，才使用该容器内的 socket 连接。一次 SQL dump 请求只授权执行该 dump；不应为远端 DSN 更换命令执行位置、猜测容器或安排其他连接方式。连接或客户端失败时，报告 dbtalk 的失败结果并停止。
 
 不要安装客户端、拉取镜像或替换为其他备份工具。
 
@@ -78,7 +74,7 @@ restore 会覆盖或删除 dump 中同名表及数据，不能整体回滚。完
 ## 运行路径与故障处理
 
 - 密码只通过子进程环境变量 `MYSQL_PWD` 传递，输出中不得回显。
-- Docker 回退连接本机数据库时使用 `host.docker.internal`；不要改成容器内的 `localhost`。
+- 已识别的本机端口映射使用目标数据库容器内的默认 socket，不传 `-h` 或 `-P`；Docker 临时客户端回退连接本机数据库时仍使用 `host.docker.internal`。
 - Docker daemon 不可用或本地没有 `mysql` 镜像时，如实报告并停止；不要自动重试、拉取镜像、创建目标库或停止其他容器。
 - dump 和 restore 没有内建超时。大文件操作仅按用户指定频率检查状态，不要中断仍在执行的 restore。
 

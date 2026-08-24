@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import shlex
 import shutil
+import subprocess
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -200,11 +201,45 @@ def dump_database_file(options: MysqlDumpOptions, output: Path) -> None:
         dump_with_local_client(options, output)
         return
 
+    container_id = docker_mapped_mysql_container(options.host, options.port)
+    if container_id is not None:
+        dump_with_mapped_container(options, output, container_id)
+        return
+
     image, reason = docker_mysql_image()
     if image is None:
         raise click.ClickException(f"mysqldump is not available. {reason}")
 
     dump_with_docker(options, output, image)
+
+
+def docker_mapped_mysql_container(host: str, port: int) -> str | None:
+    """Return the sole running container that publishes a local MySQL port."""
+    if not is_local_mysql_host(host):
+        return None
+
+    try:
+        listed = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "--quiet",
+                "--filter",
+                "status=running",
+                "--filter",
+                f"publish={port}",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if listed.returncode != 0:
+        return None
+
+    container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    return container_ids[0] if len(container_ids) == 1 else None
 
 
 def dump_with_local_client(options: MysqlDumpOptions, output: Path) -> None:
@@ -213,6 +248,27 @@ def dump_with_local_client(options: MysqlDumpOptions, output: Path) -> None:
         mysql_password_environment(options.password),
     )
     ensure_command_succeeded(result, "mysqldump")
+
+
+def dump_with_mapped_container(options: MysqlDumpOptions, output: Path, container_id: str) -> None:
+    """Run mysqldump through the database container's default Unix socket."""
+    container_output = f"/tmp/dbtalk-dump-{uuid.uuid4().hex}.sql"
+    environment = mysql_password_environment(options.password)
+    command = [
+        "docker",
+        "exec",
+        "--env",
+        "MYSQL_PWD",
+        container_id,
+        *mysqldump_command_args(options, container_output, compress=False),
+    ]
+    try:
+        ensure_command_succeeded(run_command(command, environment), "Container mysqldump")
+        copy_command = ["docker", "cp", f"{container_id}:{container_output}", str(output)]
+        ensure_command_succeeded(run_command(copy_command, environment), "Container dump copy")
+    finally:
+        with contextlib.suppress(OSError):
+            run_command(["docker", "exec", container_id, "rm", "-f", container_output])
 
 
 def dump_with_docker(options: MysqlDumpOptions, output: Path, image: str) -> None:

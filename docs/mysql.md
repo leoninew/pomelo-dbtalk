@@ -86,8 +86,7 @@ uv run dbtalk mysql restore `
 
 ## 客户端与故障处理
 
-`dbtalk` 优先使用本机 `mysqldump` 或 `mysql` 可执行文件。缺失时才使用本机已有的 Docker `mysql` 镜像；
-不会安装客户端、拉取镜像、创建数据库或自动重试。
+`dbtalk` 优先使用本机 `mysqldump`。本机客户端缺失且 DSN 使用 `localhost` 或 `127.0.0.1` 时，若该发布端口唯一对应一个运行中的 Docker 容器，`dbtalk` 直接在该容器中执行 `mysqldump`，通过默认 Unix socket 连接，并将文件复制到请求的宿主机输出路径。无法唯一识别容器时，才使用本机已有的 Docker `mysql` 镜像，通过 `host.docker.internal` 访问另一服务。不会安装客户端、拉取镜像、创建数据库或猜测容器。
 
 ## 用户与授权
 

@@ -27,6 +27,7 @@ from dbtalk.mysql.cli import (
     resolve_restore_options,
     restore_database,
 )
+from dbtalk.mysql.dump import docker_mapped_mysql_container
 from dbtalk.settings import MySQLDumpConfig, MySQLRestoreConfig
 
 
@@ -145,6 +146,7 @@ class MysqlCommandTests(unittest.TestCase):
 
         with (
             patch("dbtalk.mysql.dump.shutil.which", return_value=None),
+            patch("dbtalk.mysql.dump.docker_mapped_mysql_container", return_value=None),
             patch(
                 "dbtalk.mysql.dump.docker_mysql_image",
                 return_value=("mysql:8.4", ""),
@@ -198,6 +200,10 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch(
+                    "dbtalk.mysql.dump.docker_mapped_mysql_container",
+                    return_value=None,
+                ),
+                patch(
                     "dbtalk.mysql.dump.shutil.which",
                     return_value="/usr/bin/mysqldump",
                 ),
@@ -208,6 +214,86 @@ class MysqlCommandTests(unittest.TestCase):
             self.assertEqual(output, Path("backup.sql.gz").resolve())
             with gzip.open(output, "rt", encoding="utf-8") as compressed:
                 self.assertEqual(compressed.read(), "SELECT 1;\n")
+
+    def test_dump_database_uses_mapped_mysql_container_before_other_clients(self) -> None:
+        options = MysqlDumpOptions(
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="secret",
+            database="example",
+            output=Path("backup.sql"),
+        )
+        success = CompletedProcess([], 0, "", "")
+
+        with (
+            patch(
+                "dbtalk.mysql.dump.docker_mapped_mysql_container",
+                return_value="mysql-server",
+            ),
+            patch("dbtalk.mysql.dump.shutil.which", return_value=None) as which,
+            patch(
+                "dbtalk.mysql.dump.run_command",
+                side_effect=[success, success, success],
+            ) as run,
+        ):
+            output = dump_database(options)
+
+        self.assertEqual(output, Path("backup.sql").resolve())
+        which.assert_called_once_with("mysqldump")
+        dump_command = run.call_args_list[0].args[0]
+        self.assertEqual(
+            dump_command[:7],
+            [
+                "docker",
+                "exec",
+                "--env",
+                "MYSQL_PWD",
+                "mysql-server",
+                "mysqldump",
+                "-u",
+            ],
+        )
+        self.assertNotIn("-h", dump_command)
+        self.assertNotIn("-P", dump_command)
+        self.assertEqual(run.call_args_list[0].args[1]["MYSQL_PWD"], "secret")
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["docker", "cp", ANY, str(Path("backup.sql").resolve())],
+        )
+        self.assertEqual(
+            run.call_args_list[2].args[0][:5],
+            ["docker", "exec", "mysql-server", "rm", "-f"],
+        )
+
+    def test_docker_mapped_mysql_container_matches_the_requested_host_port(self) -> None:
+        listed = CompletedProcess([], 0, "mysql-server\n", "")
+        with (
+            patch("dbtalk.mysql.dump.subprocess.run", return_value=listed),
+        ):
+            container_id = docker_mapped_mysql_container("localhost", 3306)
+
+        self.assertEqual(container_id, "mysql-server")
+
+    def test_docker_mapped_mysql_container_rejects_ambiguous_container_matches(self) -> None:
+        listed = CompletedProcess([], 0, "mysql-one\nmysql-two\n", "")
+
+        with (
+            patch("dbtalk.mysql.dump.shutil.which", return_value="docker"),
+            patch("dbtalk.mysql.dump.subprocess.run", return_value=listed) as run,
+        ):
+            container_id = docker_mapped_mysql_container("localhost", 3306)
+
+        self.assertIsNone(container_id)
+        self.assertEqual(run.call_count, 1)
+
+    def test_docker_mapped_mysql_container_handles_a_docker_start_failure(self) -> None:
+        with (
+            patch("dbtalk.mysql.dump.subprocess.run", side_effect=OSError("unavailable")),
+        ):
+            container_id = docker_mapped_mysql_container("localhost", 3306)
+
+        self.assertIsNone(container_id)
 
     def test_cli_dumps_to_current_directory_when_output_is_omitted(self) -> None:
         runner = CliRunner()
@@ -480,6 +566,7 @@ class MysqlCommandTests(unittest.TestCase):
         message = "mysqldump is not available. Docker is not installed or is not on PATH."
         with (
             patch("dbtalk.mysql.dump.shutil.which", return_value=None),
+            patch("dbtalk.mysql.dump.docker_mapped_mysql_container", return_value=None),
             patch(
                 "dbtalk.mysql.dump.docker_mysql_image",
                 return_value=(None, "Docker is not installed or is not on PATH."),
