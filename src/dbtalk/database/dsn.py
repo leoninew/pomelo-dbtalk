@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from dotenv import dotenv_values
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
@@ -22,6 +23,7 @@ ASYNC_DRIVERS = {
     "mysql": "mysql+asyncmy",
     "postgresql": "postgresql+psycopg",
 }
+DOTENV_DSN_PREFIX = "DBTALK_"
 
 
 @dataclass(frozen=True)
@@ -89,11 +91,13 @@ def parse_dsn(value: str, *, async_mode: bool = False) -> ParsedDsn:
 
 
 def dsn_from_environment(environment_name: str | None, *, async_mode: bool = False) -> ParsedDsn:
-    """Load a DSN from an environment variable without exposing its value."""
+    """Load a DSN from the environment or the current directory's ``.env`` file."""
 
     if not environment_name:
         raise DatabaseOperationError("--dsn-env is required")
     value = os.environ.get(environment_name)
+    if value is None and environment_name.startswith(DOTENV_DSN_PREFIX):
+        value = dotenv_values(Path.cwd() / ".env").get(environment_name)
     if not value:
         raise DatabaseOperationError("DSN environment variable is not set")
     return parse_dsn(value, async_mode=async_mode)

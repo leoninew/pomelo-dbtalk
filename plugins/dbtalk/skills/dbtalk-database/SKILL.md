@@ -9,6 +9,12 @@ description: 使用 dbtalk database 或 dbtalk mysql 通过明确 DSN 执行数�
 
 所有数据库命令都必须接收一个完整 DSN，或接收 `--dsn-env NAME` 从环境变量读取 DSN；二者不能同时
 提供，也不能省略。不要使用 `sqlite-file`、`--sqlite-path`、`--mysql-dsn-env` 或无 driver 的 DSN。
+对于 `--dsn-env DBTALK_*`，dbtalk 先使用同名进程环境变量；变量不存在时才从当前目录 `.env` 读取同名值。
+非 `DBTALK_*` 名称仅从进程环境读取。
+
+代理可在用户已提供或明确授权的 DSN 范围内创建或更新当前目录、Git 已忽略的 `.env`，例如
+`DBTALK_APP_DSN=...`，再使用 `--dsn-env DBTALK_APP_DSN`。不得猜测凭据，不得把 DSN 写入 `.env.example`、
+日志、命令参数、输出或 Git 提交。
 
 支持的 canonical DSN：
 
@@ -31,10 +37,10 @@ dbtalk database query `
   --param id=1 `
   --format json
 
-$env:APP_DSN = 'sqlite:///./data/app.db'
+$env:DBTALK_APP_DSN = 'sqlite:///./data/app.db'
 dbtalk database exec `
   --write `
-  --dsn-env APP_DSN `
+  --dsn-env DBTALK_APP_DSN `
   --timeout 30 `
   --sql 'UPDATE users SET name = :name WHERE id = :id' `
   --param 'name="Ada"' `
@@ -54,10 +60,10 @@ MySQL 分别使用其原生会话或驱动机制。MySQL 写入超时后不保�
 ## JSONL Transfer
 
 ```powershell
-$env:SOURCE_DSN = 'postgresql+psycopg://user:password@host:5432/source_db'
+$env:DBTALK_SOURCE_DSN = 'postgresql+psycopg://user:password@host:5432/source_db'
 dbtalk database export `
   --source postgresql `
-  --dsn-env SOURCE_DSN `
+  --dsn-env DBTALK_SOURCE_DSN `
   --output .\data\source.jsonl
 
 dbtalk database import `
@@ -80,7 +86,7 @@ dbtalk mysql dump `
   --output .\data\backup.sql
 
 dbtalk mysql restore `
-  --dsn-env SOURCE_DSN `
+  --dsn-env DBTALK_SOURCE_DSN `
   --input .\data\backup.sql
 ```
 

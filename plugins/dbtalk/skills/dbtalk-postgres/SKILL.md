@@ -20,11 +20,13 @@ dbtalk postgres database --help
 ## 连接与客户端
 
 连接必须通过完整的 `--dsn DSN` 或 `--dsn-env NAME` 二选一提供，并使用
-`postgresql+psycopg://user:password@host:5432/database`。脚本中把 DSN 保存到环境变量，不能在命令行、
-日志、skill 或 archive 文件名中暴露真实密码：
+`postgresql+psycopg://user:password@host:5432/database`。脚本中把 DSN 保存到环境变量。对于
+`--dsn-env DBTALK_*`，dbtalk 优先使用同名进程环境变量；变量不存在时才读取当前目录、Git 已忽略 `.env`
+的同名值。代理在用户已提供或明确授权 DSN 时可创建或更新 `.env` 中的 `DBTALK_*` 条目，但不得猜测
+凭据或将它写入 `.env.example`、命令行、日志、skill、Git 提交或 archive 文件名：
 
 ```powershell
-$env:APP_DSN = 'postgresql+psycopg://backup:password@db.example.com:5432/app'
+$env:DBTALK_APP_DSN = 'postgresql+psycopg://backup:password@db.example.com:5432/app'
 ```
 
 优先使用本机 `pg_dump` / `pg_restore`。缺失时，只能使用 `postgres.client_image` 配置的本地 Docker image，
@@ -37,9 +39,9 @@ $env:APP_DSN = 'postgresql+psycopg://backup:password@db.example.com:5432/app'
 DSN 必须连接到目标以外的维护库，通常为 `postgres`，并使用具有建库或删库权限的账号。
 
 ```powershell
-dbtalk postgres database list --dsn-env POSTGRES_MANAGEMENT_DSN
-dbtalk postgres database create --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db
-dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --yes
+dbtalk postgres database list --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN
+dbtalk postgres database create --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN --name app_db
+dbtalk postgres database drop --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN --name app_db --yes
 ```
 
 先执行 `list` 核对目标。删除不可逆，只有用户明确授权删除指定目标时才传入 `--yes`；不能删除管理 DSN
@@ -49,8 +51,8 @@ dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --
 ## Dump
 
 ```powershell
-dbtalk postgres dump --dsn-env APP_DSN --output .\data\app.dump
-dbtalk postgres dump --dsn-env APP_DSN --compression-level 6
+dbtalk postgres dump --dsn-env DBTALK_APP_DSN --output .\data\app.dump
+dbtalk postgres dump --dsn-env DBTALK_APP_DSN --compression-level 6
 ```
 
 dump 只输出 custom `.dump` archive，默认在 `postgres.output_directory` 中生成带时间戳的文件。archive
@@ -61,7 +63,7 @@ dump 只输出 custom `.dump` archive，默认在 `postgres.output_directory` �
 restore 会修改目标数据库。只有目标 DSN、输入 archive 来源和写入授权均已明确时才能执行：
 
 ```powershell
-dbtalk postgres restore --dsn-env APP_DSN --input .\data\app.dump
+dbtalk postgres restore --dsn-env DBTALK_APP_DSN --input .\data\app.dump
 ```
 
 目标数据库必须已经存在。默认跳过 archive 中的 owner 和 ACL；需要保留时传入
