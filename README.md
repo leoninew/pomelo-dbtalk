@@ -56,14 +56,13 @@ DSN 写入进程参数；不支持无 driver 的数据库 URL 或数据库类型
 
 SQL 和 JSONL 制品应放在被 Git 忽略的 `data/` 或其他受控目录。
 
-## 本地发布
+## 本地安装
 
-`make release` 严格依次执行 `scripts/release.py plugin check`、`pip install -e .` 和
-`scripts/release.py plugin apply`。plugin 子命令通过已安装的 Codex、Claude、Grok CLI 各自的 plugin 安装器更新仓库
+`make install` 严格依次执行 plugin 预检、`uv tool install --editable . --force` 和 plugin 应用。plugin 子命令通过已安装的 Codex、Claude、Grok CLI 各自的 plugin 安装器更新仓库
 marketplace 中的 plugin。自动模式跳过缺失的部分宿主；三个宿主均不存在时会在 CLI 安装和宿主写操作前失败。预览而不写入时使用：
 
 ```powershell
-python scripts/release.py plugin apply --dry-run
+uv run python scripts/release.py plugin apply --dry-run
 ```
 
 使用 `--codex` 选择宿主，或使用 `--strict` 要求三个宿主都可用。`release.py` 的显式入口为 `plugin check`、
@@ -79,10 +78,13 @@ marketplace 和 plugin；dry-run 仍会执行只读预检和计划，不会写�
 同步器只通过宿主原生 CLI 管理 plugin：自动模式跳过未安装的宿主 CLI，显式 `--claude`、`--codex`、`--grok`
 或 `--strict` 会在任何写入前失败。`check`、`list` 和 `--dry-run` 无写入；实际运行可能逐宿主产生部分成功，结果会逐项报告。
 
+`make release` 仅构建 source 和 wheel 发布产物，不上传、不安装 CLI，也不修改 agent plugin。
+
 ## 测试
 
 ```powershell
-uv run pytest
+make test
+make test cov=1
 ```
 
 依赖真实 MySQL 或 Docker 的集成测试默认跳过；运行条件和操作限制见对应命令手册。

@@ -94,14 +94,23 @@ def test_release_configuration_is_local_and_native_plugin_only() -> None:
     assert not (REPOSITORY_ROOT / "scripts" / "release_config.py").exists()
 
 
-def test_release_installs_editably_between_preflight_and_apply() -> None:
+def test_install_installs_editably_between_preflight_and_apply() -> None:
+    makefile = (REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
+    install_target = makefile[makefile.index("install: ##") : makefile.index("check: ##")]
+
+    assert "pip install" not in install_target
+    assert install_target.index(
+        "$(UV) run python scripts/release.py plugin check"
+    ) < install_target.index("$(UV) tool install --editable . --force")
+    assert install_target.index("$(UV) tool install --editable . --force") < install_target.index(
+        "$(UV) run python scripts/release.py plugin apply"
+    )
+
+
+def test_release_only_builds_distribution_artifacts() -> None:
     makefile = (REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
     release_target = makefile[makefile.index("release: ##") : makefile.index("docker-build:")]
 
-    assert "pip install ." not in release_target
-    assert release_target.index("python scripts/release.py plugin check") < release_target.index(
-        "pip install -e ."
-    )
-    assert release_target.index("pip install -e .") < release_target.index(
-        "python scripts/release.py plugin apply"
-    )
+    assert "$(UV) build" in release_target
+    assert "plugin" not in release_target
+    assert "tool install" not in release_target
