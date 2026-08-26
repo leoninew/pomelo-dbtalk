@@ -1,14 +1,26 @@
 .DEFAULT_GOAL := help
 
 UV ?= uv
+UV_RUN ?= $(UV) run --locked --no-sync
 DOCKER ?= docker
 IMAGE_NAME ?= dbtalk
 IMAGE_TAG ?= latest
 IMAGE := $(IMAGE_NAME):$(IMAGE_TAG)
+BINARY_NAME ?= dbtalk
+BINARY_DIST_DIR ?= dist
+BINARY_BUILD_DIR ?= build/pyinstaller
 CHECK_FIX := $(filter 1 true yes,$(fix))
 RUFF_CHECK_ARGS :=
 RUFF_FORMAT_ARGS := --check
 TEST_COV_ARGS :=
+
+ifeq ($(OS),Windows_NT)
+PYINSTALLER_DATA_SEPARATOR := ;
+PROJECT_ROOT := $(shell cygpath -w "$(CURDIR)")
+else
+PYINSTALLER_DATA_SEPARATOR := :
+PROJECT_ROOT := $(CURDIR)
+endif
 
 ifneq ($(CHECK_FIX),)
 RUFF_CHECK_ARGS := --fix
@@ -19,43 +31,42 @@ ifneq ($(filter 1 true yes,$(cov)),)
 TEST_COV_ARGS := --cov=dbtalk --cov-report=term-missing:skip-covered --cov-report=html
 endif
 
-.PHONY: help deps install check test release docker-build docker-smoke
+.PHONY: help deps install check test release binary release-image
 
 help: ## Show available targets.
 	@echo "Usage: make <target> [IMAGE_NAME=registry/dbtalk] [IMAGE_TAG=1.0.0]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  deps          Sync locked development dependencies"
+	@echo "  deps          Sync locked dependencies and install the project"
 	@echo "  install       Install the CLI and synchronize agent plugins"
 	@echo "  check         Run Ruff and Mypy quality checks (fix=1 enables fixes)"
 	@echo "  test          Run unit tests (cov=1 enables coverage reports)"
 	@echo "  release       Build source and wheel distributions"
-	@echo "  docker-build  Build the runtime container image"
-	@echo "  docker-smoke  Run the image entrypoint with --version"
+	@echo "  binary        Build a standalone executable"
+	@echo "  release-image Build the runtime container image"
 
-deps: ## Sync all locked development dependencies without installing the project.
-	$(UV) sync --all-groups --locked --no-install-project
+deps: ## Sync locked development dependencies and install the project.
+	$(UV) sync --all-groups --locked
 
 install: ## Install the CLI and synchronize agent plugins.
-	$(UV) run python scripts/release.py plugin check
+	$(UV) run --locked python scripts/install.py plugin check
 	$(UV) tool install --editable . --force
 	dbtalk --version
-	$(UV) run python scripts/release.py plugin apply
+	$(UV) run --locked python scripts/install.py plugin apply
 
 check: ## Run Ruff and Mypy checks without tests; use fix=1 to fix Ruff issues.
-	$(UV) run ruff format $(RUFF_FORMAT_ARGS) src tests
-	$(UV) run ruff check $(RUFF_CHECK_ARGS) src tests
-	$(UV) run mypy src tests
+	$(UV_RUN) ruff format $(RUFF_FORMAT_ARGS) src tests
+	$(UV_RUN) ruff check $(RUFF_CHECK_ARGS) src tests
+	$(UV_RUN) mypy src tests
 
 test: ## Run unit tests; use cov=1 to collect coverage.
-	$(UV) run pytest $(TEST_COV_ARGS)
-	$(UV) run python scripts/test_release.py
+	$(UV_RUN) pytest $(TEST_COV_ARGS)
 
 release: ## Build source and wheel distributions.
 	$(UV) build
 
-docker-build: ## Build the runtime container image.
-	$(DOCKER) build --tag $(IMAGE) .
+binary: ## Build a standalone executable with PyInstaller.
+	$(UV_RUN) pyinstaller --noconfirm --clean --onefile --name $(BINARY_NAME) --add-data "$(PROJECT_ROOT)/dbtalk.yaml$(PYINSTALLER_DATA_SEPARATOR)." --distpath $(BINARY_DIST_DIR) --workpath $(BINARY_BUILD_DIR) --specpath $(BINARY_BUILD_DIR) src/dbtalk/__main__.py
 
-docker-smoke: docker-build ## Run the image entrypoint smoke test.
-	$(DOCKER) run --rm $(IMAGE) --version
+release-image: ## Build the runtime container image.
+	$(DOCKER) build --tag $(IMAGE) .

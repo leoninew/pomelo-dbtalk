@@ -48,10 +48,10 @@ image（默认 `postgres:18`）；不会拉取 image。它只处理 custom archi
 在项目根目录运行 `make install` 会严格依次执行 plugin 预检、`uv tool install --editable . --force`、plugin 应用。plugin
 应用通过可用的 Codex、Claude、Grok CLI 使用各自的原生 plugin 管理器更新 plugin。Codex 与 Claude 使用 marketplace 名称
 `dbtalk-local`；Grok 直接安装仓库的 `plugins/dbtalk` 目录。自动模式跳过缺失的部分宿主，但三个宿主均缺失时会在 CLI
-安装和宿主写操作前失败。`release.py plugin apply --dry-run` 可在不写入环境的情况下执行只读预检并预览操作；可使用
+安装和宿主写操作前失败。`install.py plugin apply --dry-run` 可在不写入环境的情况下执行只读预检并预览操作；可使用
 `--codex` 选择宿主，或使用 `--strict` 要求三个宿主都可用。项目内脚本自包含同步引擎，不读取额外 JSON 配置，也不写入
 宿主的 cache、credentials、主配置或普通 `skills/` 镜像目录。
 
-`scripts/release.py` 只提供显式的 `plugin check|list|apply|remove` 子命令；无参数或只指定 `plugin` 时显示帮助。
+`scripts/install.py` 只提供显式的 `plugin check|list|apply|remove` 子命令；无参数或只指定 `plugin` 时显示帮助。
 
 `make release` 仅执行 `uv build`，构建 source 和 wheel 发布产物；它不安装 CLI，也不修改 agent plugin。

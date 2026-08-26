@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,8 @@ class Settings:
 
 
 def default_project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
 
 
@@ -75,8 +78,12 @@ def load_settings(project_root: Path | None = None) -> Settings:
     root = (project_root or default_project_root()).resolve()
     environment = os.environ.get(ENV_SELECTOR)
     dotenv_path = root / f".env.{environment}" if environment else None
+    settings_files = bundled_settings_files() if project_root is None else []
+    config_path = root / "dbtalk.yaml"
+    if config_path.is_file() or not settings_files:
+        settings_files.append(config_path)
     config = Dynaconf(
-        settings_files=[str(root / "dbtalk.yaml")],
+        settings_files=[str(path) for path in settings_files],
         envvar_prefix=ENV_PREFIX,
         load_dotenv=dotenv_path is not None,
         dotenv_path=str(dotenv_path) if dotenv_path else None,
@@ -90,6 +97,15 @@ def load_settings(project_root: Path | None = None) -> Settings:
         database=load_database_transfer_config(config.get("database")),
         postgres=load_postgres_config(config.get("postgres")),
     )
+
+
+def bundled_settings_files() -> list[Path]:
+    """Return the default configuration embedded by PyInstaller, when present."""
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if not getattr(sys, "frozen", False) or not isinstance(bundle_root, str):
+        return []
+    config_path = Path(bundle_root) / "dbtalk.yaml"
+    return [config_path] if config_path.is_file() else []
 
 
 def mapping_config(value: Any) -> Mapping[str, object]:

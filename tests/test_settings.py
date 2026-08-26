@@ -1,6 +1,7 @@
 """Tests for dbtalk configuration sources."""
 
 import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -114,6 +115,40 @@ def test_postgres_client_image_can_be_overridden(tmp_path: Path, monkeypatch: Mo
     settings = load_settings(tmp_path)
 
     assert settings.postgres.client_image == "registry.example/postgres:19"
+
+
+def test_frozen_binary_loads_embedded_config_and_executable_overrides(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    bundle_root = tmp_path / "bundle"
+    executable_root = tmp_path / "release"
+    bundle_root.mkdir()
+    executable_root.mkdir()
+    write_settings(bundle_root)
+    (bundle_root / "dbtalk.yaml").write_text(
+        DEFAULT_SETTINGS.replace("operation_timeout_seconds: 30", "operation_timeout_seconds: 61"),
+        encoding="utf-8",
+    )
+    (executable_root / "dbtalk.yaml").write_text(
+        "mysqldump:\n  host: executable.example.test\n",
+        encoding="utf-8",
+    )
+    (executable_root / ".env.local").write_text(
+        "DBTALK_POSTGRES__CLIENT_IMAGE=dotenv.example/postgres:19\n",
+        encoding="utf-8",
+    )
+    executable = executable_root / "dbtalk.exe"
+    executable.touch()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(bundle_root), raising=False)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    monkeypatch.setenv("DBTALK_ENVKEY", "local")
+
+    settings = load_settings()
+
+    assert settings.mysqldump.host == "executable.example.test"
+    assert settings.database.operation_timeout_seconds == 61
+    assert settings.postgres.client_image == "dotenv.example/postgres:19"
 
 
 def write_settings(path: Path) -> None:

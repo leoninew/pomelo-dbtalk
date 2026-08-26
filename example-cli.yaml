@@ -1,8 +1,0 @@
-# Defaults. Use .env.<ENVKEY> or EXAMPLE_CLI_* variables for local overrides.
-app:
-  name: example-cli
-  greeting_prefix: Hello
-
-logging:
-  level: INFO
-  format: "%(levelname)s %(name)s: %(message)s"
