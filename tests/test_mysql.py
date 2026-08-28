@@ -72,14 +72,13 @@ class MysqlCommandTests(unittest.TestCase):
             password="p@ss word$",
             database="example",
             output=Path("backup file.sql"),
-            create_database=True,
-            drop_database=True,
+            skip_definer=True,
         )
 
         self.assertEqual(
             generate_dump_command(options),
             "env 'MYSQL_PWD=p@ss word$' mysqldump -C -h db.example.com -P 3307 "
-            "-u 'backup user' -B example --add-drop-database -R -E "
+            "-u 'backup user' -B example --no-create-db --skip-definer -R -E "
             "--set-gtid-purged=OFF --skip-lock-tables -r 'backup file.sql'",
         )
 
@@ -91,9 +90,14 @@ class MysqlCommandTests(unittest.TestCase):
             password="secret",
             database="example",
             output=Path("backup.sql"),
-            create_database=True,
-            drop_database=True,
+            skip_definer=True,
         )
+
+        def write_dump(
+            command: list[str], environment: dict[str, str], **_: object
+        ) -> CompletedProcess[str]:
+            Path(command[-1]).write_text("SELECT 1;\n", encoding="utf-8")
+            return CompletedProcess(command, 0, "", "")
 
         with (
             patch(
@@ -102,7 +106,7 @@ class MysqlCommandTests(unittest.TestCase):
             ),
             patch(
                 "dbtalk.mysql.dump.run_command",
-                return_value=CompletedProcess([], 0, "", ""),
+                side_effect=write_dump,
             ) as run,
         ):
             output = dump_database(options)
@@ -122,13 +126,14 @@ class MysqlCommandTests(unittest.TestCase):
                 "backup",
                 "-B",
                 "example",
-                "--add-drop-database",
+                "--no-create-db",
+                "--skip-definer",
                 "-R",
                 "-E",
                 "--set-gtid-purged=OFF",
                 "--skip-lock-tables",
                 "-r",
-                str(Path("backup.sql").resolve()),
+                ANY,
             ],
         )
         self.assertEqual(run.call_args.args[1]["MYSQL_PWD"], "secret")
@@ -141,8 +146,18 @@ class MysqlCommandTests(unittest.TestCase):
             password="secret",
             database="example",
             output=Path("backup.sql"),
+            skip_definer=True,
         )
         success = CompletedProcess([], 0, "", "")
+
+        def run_docker(
+            command: list[str],
+            environment: dict[str, str] | None = None,
+            **_: object,
+        ) -> CompletedProcess[str]:
+            if command[1] == "cp":
+                Path(command[-1]).write_text("SELECT 1;\n", encoding="utf-8")
+            return success
 
         with (
             patch("dbtalk.mysql.dump.shutil.which", return_value=None),
@@ -153,7 +168,7 @@ class MysqlCommandTests(unittest.TestCase):
             ),
             patch(
                 "dbtalk.mysql.dump.run_command",
-                side_effect=[success, success],
+                side_effect=run_docker,
             ) as run,
             patch("dbtalk.mysql.dump.remove_temporary_container"),
         ):
@@ -165,6 +180,7 @@ class MysqlCommandTests(unittest.TestCase):
         self.assertIn("mysql:8.4", docker_run)
         self.assertIn("host.docker.internal", docker_run)
         self.assertNotIn("-C", docker_run)
+        self.assertIn("--skip-definer", docker_run)
         self.assertNotIn("secret", docker_run)
         self.assertEqual(
             run.call_args_list[1].args[0],
@@ -172,7 +188,7 @@ class MysqlCommandTests(unittest.TestCase):
                 "docker",
                 "cp",
                 ANY,
-                str(Path("backup.sql").resolve()),
+                ANY,
             ],
         )
         self.assertEqual(run.call_count, 2)
@@ -192,7 +208,7 @@ class MysqlCommandTests(unittest.TestCase):
             )
 
             def write_dump(
-                command: list[str], environment: dict[str, str]
+                command: list[str], environment: dict[str, str], **_: object
             ) -> CompletedProcess[str]:
                 self.assertEqual(environment["MYSQL_PWD"], "secret")
                 Path(command[-1]).write_text("SELECT 1;\n", encoding="utf-8")
@@ -223,8 +239,18 @@ class MysqlCommandTests(unittest.TestCase):
             password="secret",
             database="example",
             output=Path("backup.sql"),
+            skip_definer=True,
         )
         success = CompletedProcess([], 0, "", "")
+
+        def run_docker(
+            command: list[str],
+            environment: dict[str, str] | None = None,
+            **_: object,
+        ) -> CompletedProcess[str]:
+            if command[1] == "cp":
+                Path(command[-1]).write_text("SELECT 1;\n", encoding="utf-8")
+            return success
 
         with (
             patch(
@@ -234,7 +260,7 @@ class MysqlCommandTests(unittest.TestCase):
             patch("dbtalk.mysql.dump.shutil.which", return_value=None) as which,
             patch(
                 "dbtalk.mysql.dump.run_command",
-                side_effect=[success, success, success],
+                side_effect=run_docker,
             ) as run,
         ):
             output = dump_database(options)
@@ -256,10 +282,11 @@ class MysqlCommandTests(unittest.TestCase):
         )
         self.assertNotIn("-h", dump_command)
         self.assertNotIn("-P", dump_command)
+        self.assertIn("--skip-definer", dump_command)
         self.assertEqual(run.call_args_list[0].args[1]["MYSQL_PWD"], "secret")
         self.assertEqual(
             run.call_args_list[1].args[0],
-            ["docker", "cp", ANY, str(Path("backup.sql").resolve())],
+            ["docker", "cp", ANY, ANY],
         )
         self.assertEqual(
             run.call_args_list[2].args[0][:5],
@@ -346,8 +373,7 @@ class MysqlCommandTests(unittest.TestCase):
                     "dump",
                     "--dsn",
                     "mysql+pymysql://cli-user:configured-password@db.example.test:3307/configured-database",
-                    "--create-database",
-                    "--drop-database",
+                    "--skip-definer",
                     "--output",
                     "backups",
                 ],
@@ -359,8 +385,7 @@ class MysqlCommandTests(unittest.TestCase):
             self.assertEqual(options.user, "cli-user")
             self.assertEqual(options.password, "configured-password")
             self.assertEqual(options.database, "configured-database")
-            self.assertTrue(options.create_database)
-            self.assertTrue(options.drop_database)
+            self.assertTrue(options.skip_definer)
             self.assertEqual(options.output.parent, Path.cwd() / "backups")
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -381,6 +406,32 @@ class MysqlCommandTests(unittest.TestCase):
             )
             self.assertTrue(output.parent.is_dir())
 
+    def test_default_dump_output_adds_a_sequence_for_existing_files(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            Path("data").mkdir()
+            Path("data/example-20260819-103705.sql").write_text("old", encoding="utf-8")
+            Path("data/example-20260819-103705.sql.gz").write_bytes(b"old")
+
+            self.assertEqual(
+                default_dump_output(
+                    "example",
+                    datetime(2026, 8, 19, 10, 37, 5),
+                    output_directory="data",
+                ),
+                Path.cwd() / "data" / "example-20260819-103705-1.sql",
+            )
+            self.assertEqual(
+                default_dump_output(
+                    "example",
+                    datetime(2026, 8, 19, 10, 37, 5),
+                    output_directory="data",
+                    archive=True,
+                ),
+                Path.cwd() / "data" / "example-20260819-103705-1.sql.gz",
+            )
+
     def test_explicit_dump_directory_uses_timestamped_default_name(self) -> None:
         config = MySQLDumpConfig(
             host="localhost",
@@ -388,8 +439,6 @@ class MysqlCommandTests(unittest.TestCase):
             user="root",
             password="secret",
             database="example",
-            create_database=False,
-            drop_database=False,
             output_directory="data",
         )
         runner = CliRunner()
@@ -409,8 +458,6 @@ class MysqlCommandTests(unittest.TestCase):
                     password=None,
                     database=None,
                     output=Path("exports"),
-                    create_database=None,
-                    drop_database=None,
                     archive=True,
                 ),
             )
@@ -463,6 +510,122 @@ class MysqlCommandTests(unittest.TestCase):
         with self.assertRaisesRegex(click.ClickException, "output directory does not exist"):
             dump_database(options)
 
+    def test_dump_failure_preserves_existing_output_and_cleans_temporary_file(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            output = Path("backup.sql")
+            output.write_text("known-good\n", encoding="utf-8")
+            options = MysqlDumpOptions(
+                host="localhost",
+                port=3306,
+                user="root",
+                password="secret",
+                database="example",
+                output=output,
+            )
+
+            def fail_dump(
+                command: list[str], environment: dict[str, str], **_: object
+            ) -> CompletedProcess[str]:
+                Path(command[-1]).write_text("partial\n", encoding="utf-8")
+                return CompletedProcess(command, 1, "", "network failure")
+
+            with (
+                patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
+                patch("dbtalk.mysql.dump.run_command", side_effect=fail_dump),
+                self.assertRaisesRegex(click.ClickException, "network failure"),
+            ):
+                dump_database(options)
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "known-good\n")
+            self.assertEqual(list(Path.cwd().glob(".dbtalk-mysqldump-*")), [])
+
+    def test_automatic_dump_publish_does_not_overwrite_a_concurrent_output(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            output = Path("backup.sql")
+            options = MysqlDumpOptions(
+                host="localhost",
+                port=3306,
+                user="root",
+                password="secret",
+                database="example",
+                output=output,
+                automatic_output=True,
+            )
+
+            def write_dump(
+                command: list[str], environment: dict[str, str], **_: object
+            ) -> CompletedProcess[str]:
+                Path(command[-1]).write_text("SELECT 1;\n", encoding="utf-8")
+                output.write_text("written by another task\n", encoding="utf-8")
+                return CompletedProcess(command, 0, "", "")
+
+            with (
+                patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
+                patch("dbtalk.mysql.dump.run_command", side_effect=write_dump),
+            ):
+                published = dump_database(options)
+
+            self.assertEqual(published, Path("backup-1.sql").resolve())
+            self.assertEqual(output.read_text(encoding="utf-8"), "written by another task\n")
+            self.assertEqual(published.read_text(encoding="utf-8"), "SELECT 1;\n")
+
+    def test_dump_rejects_empty_native_output(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            options = MysqlDumpOptions(
+                host="localhost",
+                port=3306,
+                user="root",
+                password="secret",
+                database="example",
+                output=Path("backup.sql"),
+            )
+
+            with (
+                patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
+                patch(
+                    "dbtalk.mysql.dump.run_command",
+                    return_value=CompletedProcess([], 0, "", ""),
+                ),
+                self.assertRaisesRegex(click.ClickException, "non-empty dump"),
+            ):
+                dump_database(options)
+
+            self.assertFalse(Path("backup.sql").exists())
+
+    def test_dump_does_not_fallback_when_skip_definer_is_unsupported(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            options = MysqlDumpOptions(
+                host="localhost",
+                port=3306,
+                user="root",
+                password="secret",
+                database="example",
+                output=Path("backup.sql"),
+                skip_definer=True,
+            )
+
+            with (
+                patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
+                patch(
+                    "dbtalk.mysql.dump.run_command",
+                    return_value=CompletedProcess(
+                        [], 1, "", "mysqldump: unknown option '--skip-definer'"
+                    ),
+                ),
+                self.assertRaisesRegex(click.ClickException, "unknown option"),
+            ):
+                dump_database(options)
+
+            self.assertFalse(Path("backup.sql").exists())
+
     def test_resolve_dump_options_uses_config_defaults_and_cli_overrides(self) -> None:
         config = MySQLDumpConfig(
             host="db.example.test",
@@ -470,8 +633,6 @@ class MysqlCommandTests(unittest.TestCase):
             user="backup",
             password="test-password",
             database="app",
-            create_database=True,
-            drop_database=False,
             output_directory="backups/mysql",
         )
         runner = CliRunner()
@@ -486,8 +647,6 @@ class MysqlCommandTests(unittest.TestCase):
                     password=None,
                     database=None,
                     output=None,
-                    create_database=None,
-                    drop_database=None,
                 ),
             )
             overridden = resolve_dump_options(
@@ -499,8 +658,7 @@ class MysqlCommandTests(unittest.TestCase):
                     password="cli-password",
                     database="cli-database",
                     output=Path("explicit.sql"),
-                    create_database=False,
-                    drop_database=True,
+                    skip_definer=True,
                 ),
             )
 
@@ -509,8 +667,6 @@ class MysqlCommandTests(unittest.TestCase):
             self.assertEqual(configured.user, "backup")
             self.assertEqual(configured.password, "test-password")
             self.assertEqual(configured.database, "app")
-            self.assertTrue(configured.create_database)
-            self.assertFalse(configured.drop_database)
             self.assertTrue(configured.output.parent.is_dir())
             self.assertEqual(configured.output.parent, Path.cwd() / "backups" / "mysql")
 
@@ -520,8 +676,7 @@ class MysqlCommandTests(unittest.TestCase):
         self.assertEqual(overridden.password, "cli-password")
         self.assertEqual(overridden.database, "cli-database")
         self.assertEqual(overridden.output, Path("explicit.sql"))
-        self.assertFalse(overridden.create_database)
-        self.assertTrue(overridden.drop_database)
+        self.assertTrue(overridden.skip_definer)
 
     def test_resolve_dump_options_rejects_missing_credentials(self) -> None:
         config = MySQLDumpConfig(
@@ -530,8 +685,6 @@ class MysqlCommandTests(unittest.TestCase):
             user="",
             password="",
             database="",
-            create_database=False,
-            drop_database=False,
             output_directory="data",
         )
 
@@ -548,8 +701,6 @@ class MysqlCommandTests(unittest.TestCase):
                     password=None,
                     database=None,
                     output=None,
-                    create_database=None,
-                    drop_database=None,
                 ),
             )
 
@@ -604,6 +755,7 @@ class MysqlCommandTests(unittest.TestCase):
                 user="restore-user",
                 password="secret",
                 input=input_path,
+                database="target_database",
             )
             with (
                 patch(
@@ -618,7 +770,7 @@ class MysqlCommandTests(unittest.TestCase):
                 restored_input = restore_database(options)
 
             self.assertEqual(restored_input, input_path.resolve())
-            command = run.call_args.args[0]
+            command = run.call_args_list[1].args[0]
             self.assertEqual(
                 command,
                 [
@@ -629,11 +781,13 @@ class MysqlCommandTests(unittest.TestCase):
                     "3307",
                     "-u",
                     "restore-user",
+                    "--database",
+                    "target_database",
                 ],
             )
-            self.assertEqual(run.call_args.args[1]["MYSQL_PWD"], "secret")
+            self.assertEqual(run.call_args_list[1].args[1]["MYSQL_PWD"], "secret")
             self.assertEqual(
-                run.call_args.kwargs["input_path"],
+                run.call_args_list[1].kwargs["input_path"],
                 input_path.resolve(),
             )
 
@@ -650,14 +804,38 @@ class MysqlCommandTests(unittest.TestCase):
                 user="root",
                 password="secret",
                 input=input_path,
+                database="target_database",
             )
             captured_input: Path | None = None
 
             def read_dump(
-                command: list[str], environment: dict[str, str], *, input_path: Path
+                command: list[str],
+                environment: dict[str, str],
+                *,
+                input_path: Path | None = None,
+                **_: object,
             ) -> CompletedProcess[str]:
                 nonlocal captured_input
-                self.assertEqual(command, ["mysql", "-u", "root"])
+                if input_path is None:
+                    self.assertEqual(
+                        command,
+                        [
+                            "mysql",
+                            "-u",
+                            "root",
+                            "--database",
+                            "target_database",
+                            "--batch",
+                            "--skip-column-names",
+                            "--execute",
+                            "SELECT 1",
+                        ],
+                    )
+                    return CompletedProcess(command, 0, "", "")
+                self.assertEqual(
+                    command,
+                    ["mysql", "-u", "root", "--database", "target_database"],
+                )
                 self.assertEqual(environment["MYSQL_PWD"], "secret")
                 self.assertEqual(input_path.read_text(encoding="utf-8"), "SELECT 1;\n")
                 captured_input = input_path
@@ -683,7 +861,7 @@ class MysqlCommandTests(unittest.TestCase):
 
         with runner.isolated_filesystem():
             input_path = Path("backup.sql")
-            source = "CREATE DATABASE `source`;\nUSE `source`;\nCREATE TABLE example (id int);\n"
+            source = "USE `source`;\nCREATE TABLE example (id int);\n"
             input_path.write_text(source, encoding="utf-8")
             options = MysqlRestoreOptions(
                 host="localhost",
@@ -699,8 +877,11 @@ class MysqlCommandTests(unittest.TestCase):
                 command: list[str],
                 environment: dict[str, str],
                 *,
-                input_path: Path,
+                input_path: Path | None = None,
+                **_: object,
             ) -> CompletedProcess[str]:
+                if input_path is None:
+                    return CompletedProcess(command, 0, "", "")
                 captured["command"] = command
                 captured["environment"] = environment
                 captured["input"] = input_path.read_text(encoding="utf-8")
@@ -733,6 +914,100 @@ class MysqlCommandTests(unittest.TestCase):
             prepared_path = cast(Path, captured["input_path"])
             self.assertFalse(prepared_path.exists())
 
+    def test_restore_rejects_database_lifecycle_ddl_before_client(self) -> None:
+        for statement in (
+            "CREATE DATABASE `source`;",
+            "DROP DATABASE IF EXISTS `source`;",
+            "CREATE\nDATABASE `source`;",
+            "/* comment */ CREATE /* another comment */ DATABASE `source`;",
+            "/*!40100 DROP DATABASE IF EXISTS `source` */;",
+        ):
+            with self.subTest(statement=statement):
+                runner = CliRunner()
+                with runner.isolated_filesystem():
+                    input_path = Path("backup.sql")
+                    input_path.write_text(f"{statement}\nSELECT 1;\n", encoding="utf-8")
+                    options = MysqlRestoreOptions(
+                        host="localhost",
+                        port=3306,
+                        user="restore-user",
+                        password="secret",
+                        input=input_path,
+                        database="target_database",
+                    )
+                    with (
+                        patch("dbtalk.mysql.restore.shutil.which", return_value="/usr/bin/mysql"),
+                        patch("dbtalk.mysql.restore.run_command") as run,
+                        self.assertRaisesRegex(
+                            click.ClickException,
+                            "database lifecycle statements are not allowed",
+                        ),
+                    ):
+                        restore_database(options)
+                    run.assert_not_called()
+
+    def test_restore_does_not_reject_lifecycle_words_in_comments_or_strings(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            input_path = Path("backup.sql")
+            input_path.write_text(
+                "/* CREATE DATABASE `source`; */\nSELECT 'DROP DATABASE `source`';\n",
+                encoding="utf-8",
+            )
+            options = MysqlRestoreOptions(
+                host="localhost",
+                port=3306,
+                user="restore-user",
+                password="secret",
+                input=input_path,
+                database="target_database",
+            )
+
+            with (
+                patch("dbtalk.mysql.restore.shutil.which", return_value="/usr/bin/mysql"),
+                patch(
+                    "dbtalk.mysql.restore.run_command",
+                    return_value=CompletedProcess([], 0, "", ""),
+                ) as run,
+            ):
+                restore_database(options)
+
+            self.assertEqual(run.call_count, 2)
+
+    def test_restore_rejects_missing_target_database_before_import(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            input_path = Path("backup.sql")
+            input_path.write_text("SELECT 1;\n", encoding="utf-8")
+            options = MysqlRestoreOptions(
+                host="db.example.test",
+                port=3307,
+                user="restore-user",
+                password="secret",
+                input=input_path,
+                database="missing_database",
+            )
+            missing = CompletedProcess(
+                [],
+                1,
+                "",
+                "ERROR 1049 (42000): Unknown database 'missing_database'",
+            )
+
+            with (
+                patch("dbtalk.mysql.restore.shutil.which", return_value="/usr/bin/mysql"),
+                patch("dbtalk.mysql.restore.run_command", return_value=missing) as run,
+                self.assertRaisesRegex(
+                    click.ClickException,
+                    "Restore target database does not exist: missing_database",
+                ),
+            ):
+                restore_database(options)
+
+            self.assertEqual(run.call_count, 1)
+
     def test_restore_database_uses_local_docker_mysql_image_as_fallback(self) -> None:
         runner = CliRunner()
 
@@ -764,18 +1039,20 @@ class MysqlCommandTests(unittest.TestCase):
                 restored_input = restore_database(options)
 
             self.assertEqual(restored_input, input_path.resolve())
-            docker_run = run.call_args_list[0].args[0]
+            probe_command = run.call_args_list[0].args[0]
+            self.assertEqual(probe_command[:3], ["docker", "run", "--rm"])
+            docker_run = run.call_args_list[1].args[0]
             self.assertEqual(docker_run[:5], ["docker", "run", "-i", "--name", ANY])
             self.assertIn("mysql:8.4", docker_run)
             self.assertIn("host.docker.internal", docker_run)
             self.assertIn("target_database", docker_run)
             self.assertNotIn("secret", docker_run)
-            self.assertEqual(run.call_args.args[1]["MYSQL_PWD"], "secret")
+            self.assertEqual(run.call_args_list[1].args[1]["MYSQL_PWD"], "secret")
             self.assertEqual(
-                run.call_args.kwargs["input_path"],
+                run.call_args_list[1].kwargs["input_path"],
                 input_path.resolve(),
             )
-            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_count, 2)
 
     def test_restore_database_reports_missing_execution_path(self) -> None:
         runner = CliRunner()
@@ -789,6 +1066,7 @@ class MysqlCommandTests(unittest.TestCase):
                 user="root",
                 password="secret",
                 input=input_path,
+                database="target_database",
             )
 
             message = "mysql is not available. Docker is not installed or is not on PATH."
@@ -848,6 +1126,29 @@ class MysqlCommandTests(unittest.TestCase):
         self.assertEqual(options.database, "configured_database")
         self.assertEqual(options.input, Path("backup.sql"))
 
+    def test_resolve_restore_options_falls_back_to_dsn_database(self) -> None:
+        config = MySQLRestoreConfig(
+            host="db.example.test",
+            port=3306,
+            user="restore-user",
+            password="configured-password",
+        )
+
+        options = resolve_restore_options(
+            config,
+            MysqlRestoreOverrides(
+                host=None,
+                port=None,
+                user=None,
+                password=None,
+                input=Path("backup.sql"),
+                database=None,
+                dsn_database="dsn_database",
+            ),
+        )
+
+        self.assertEqual(options.database, "dsn_database")
+
     def test_cli_restores_input_with_explicit_dsn(self) -> None:
         runner = CliRunner()
 
@@ -869,6 +1170,8 @@ class MysqlCommandTests(unittest.TestCase):
                     "mysql+pymysql://cli-user:configured-password@db.example.test:3307/cli_database",
                     "--input",
                     "backup.sql",
+                    "--database",
+                    "target_database",
                 ],
             )
             options = restore.call_args.args[0]
@@ -883,7 +1186,7 @@ class MysqlCommandTests(unittest.TestCase):
         self.assertEqual(options.port, 3307)
         self.assertEqual(options.user, "cli-user")
         self.assertEqual(options.password, "configured-password")
-        self.assertEqual(options.database, "cli_database")
+        self.assertEqual(options.database, "target_database")
         self.assertEqual(options.input, input_path)
 
     def test_cli_restore_requires_an_existing_input_file(self) -> None:

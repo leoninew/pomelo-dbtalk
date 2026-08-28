@@ -20,8 +20,6 @@ mysqldump:
   user: ""
   password: ""
   database: ""
-  create_database: false
-  drop_database: false
   output_directory: data
 mysqlrestore:
   host: localhost
@@ -68,6 +66,26 @@ def test_loads_yaml_settings(tmp_path: Path) -> None:
     assert settings.postgres.client_image == "postgres:18"
     assert settings.logging.level == "INFO"
     assert settings.logging.format == "%(levelname)s %(name)s: %(message)s"
+
+
+def test_mysql_dump_settings_do_not_expose_database_lifecycle_switches(
+    tmp_path: Path,
+) -> None:
+    write_settings(tmp_path)
+    (tmp_path / "dbtalk.yaml").write_text(
+        (tmp_path / "dbtalk.yaml")
+        .read_text(encoding="utf-8")
+        .replace(
+            "  output_directory: data\n",
+            "  output_directory: data\n  create_database: true\n  drop_database: true\n",
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(tmp_path)
+
+    assert not hasattr(settings.mysqldump, "create_database")
+    assert not hasattr(settings.mysqldump, "drop_database")
 
 
 def test_dotenv_overrides_yaml(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

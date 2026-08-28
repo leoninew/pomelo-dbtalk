@@ -75,14 +75,9 @@ mysql.add_command(revoke_command)
     ),
 )
 @click.option(
-    "--create-database/--no-create-database",
-    default=None,
-    help="Include CREATE DATABASE statements. Defaults to mysqldump.create_database.",
-)
-@click.option(
-    "--drop-database/--no-drop-database",
-    default=None,
-    help="Include DROP DATABASE statements. Defaults to mysqldump.drop_database.",
+    "--skip-definer",
+    is_flag=True,
+    help="Pass --skip-definer to mysqldump.",
 )
 @click.option(
     "--archive",
@@ -96,9 +91,8 @@ def dump_command(  # noqa: PLR0913 - Click passes one argument for each CLI opti
     dsn_value: str | None,
     dsn_env: str | None,
     output: Path | None,
-    create_database: bool | None,
-    drop_database: bool | None,
     archive: bool,
+    skip_definer: bool,
 ) -> None:
     """Export a MySQL database."""
     settings = context_settings(ctx)
@@ -112,9 +106,8 @@ def dump_command(  # noqa: PLR0913 - Click passes one argument for each CLI opti
             password=password,
             database=database,
             output=output,
-            create_database=create_database,
-            drop_database=drop_database,
             archive=archive,
+            skip_definer=skip_definer,
         ),
     )
     completed_output = dump_database(options)
@@ -130,16 +123,26 @@ def dump_command(  # noqa: PLR0913 - Click passes one argument for each CLI opti
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="SQL dump input path.",
 )
+@click.option(
+    "--database",
+    "target_database",
+    metavar="TARGET",
+    help=(
+        "Existing database to receive the dump. Defaults to mysqlrestore.database "
+        "or the DSN database."
+    ),
+)
 @click.pass_context
 def restore_command(  # noqa: PLR0913 - Click passes one argument for each CLI option.
     ctx: click.Context,
     dsn_value: str | None,
     dsn_env: str | None,
     input: Path,
+    target_database: str | None,
 ) -> None:
     """Import a MySQL dump."""
     settings = context_settings(ctx)
-    host, port, user, password, database = mysql_connection_from_dsn(dsn_value, dsn_env)
+    host, port, user, password, dsn_database = mysql_connection_from_dsn(dsn_value, dsn_env)
     options = resolve_restore_options(
         settings.mysqlrestore,
         MysqlRestoreOverrides(
@@ -148,7 +151,8 @@ def restore_command(  # noqa: PLR0913 - Click passes one argument for each CLI o
             user=user,
             password=password,
             input=input,
-            database=database,
+            database=target_database,
+            dsn_database=dsn_database,
         ),
     )
     restored_input = restore_database(options)

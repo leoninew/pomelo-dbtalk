@@ -31,8 +31,6 @@ class MySQLDumpConfig:
     user: str
     password: str
     database: str
-    create_database: bool
-    drop_database: bool
     output_directory: str
 
 
@@ -164,8 +162,6 @@ def load_mysql_dump_config(value: Any) -> MySQLDumpConfig:
         user=user,
         password=password,
         database=database,
-        create_database=bool_config(config.get("create_database", False)),
-        drop_database=bool_config(config.get("drop_database", False)),
         output_directory=output_directory,
     )
 

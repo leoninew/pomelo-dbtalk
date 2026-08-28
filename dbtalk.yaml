@@ -11,8 +11,6 @@ mysqldump:
   user: ""
   password: ""
   database: ""
-  create_database: false
-  drop_database: false
   output_directory: data
 
 mysqlrestore:

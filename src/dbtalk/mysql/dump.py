@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import contextlib
+import logging
+import os
 import shlex
 import shutil
 import subprocess
+import tempfile
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,16 +23,20 @@ from .client import (
     docker_host_gateway_args,
     docker_mysql_image,
     ensure_command_succeeded,
+    file_size,
     gzip_output_path,
     is_local_mysql_host,
     mysql_connection_args,
     mysql_password_environment,
     remove_temporary_container,
     run_command,
+    sanitize_error_message,
     write_gzip,
 )
 
 DOCKER_DUMP_PATH = "/tmp/dbtalk-dump.sql"
+logger = logging.getLogger("dbtalk")
+ProgressCallback = Callable[[int], None]
 
 
 @dataclass(frozen=True)
@@ -38,9 +47,9 @@ class MysqlDumpOptions:
     password: str
     database: str
     output: Path
-    create_database: bool = False
-    drop_database: bool = False
     archive: bool = False
+    skip_definer: bool = False
+    automatic_output: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,9 +60,8 @@ class MysqlDumpOverrides:
     password: str | None
     database: str | None
     output: Path | None
-    create_database: bool | None
-    drop_database: bool | None
     archive: bool = False
+    skip_definer: bool = False
 
 
 def mysqldump_command_args(
@@ -72,10 +80,9 @@ def mysqldump_command_args(
             options.database,
         ]
     )
-    if options.drop_database:
-        args.append("--add-drop-database")
-    if not options.create_database:
-        args.append("--no-create-db")
+    args.append("--no-create-db")
+    if options.skip_definer:
+        args.append("--skip-definer")
     args.extend(
         [
             "-R",
@@ -117,7 +124,7 @@ def default_dump_output(
         directory = Path.cwd() / directory
     directory.mkdir(parents=True, exist_ok=True)
     output = directory / f"{database}-{timestamp}.sql"
-    return gzip_output_path(output) if archive else output
+    return _next_available_output(output, archive=archive)
 
 
 def resolve_dump_options(
@@ -145,6 +152,7 @@ def resolve_dump_options(
             "Set mysqldump values or pass the corresponding CLI options."
         )
 
+    automatic_output = overrides.output is None or overrides.output.is_dir()
     return MysqlDumpOptions(
         host=host,
         port=port,
@@ -162,15 +170,9 @@ def resolve_dump_options(
             if overrides.output is None or overrides.output.is_dir()
             else overrides.output
         ),
-        create_database=(
-            overrides.create_database
-            if overrides.create_database is not None
-            else config.create_database
-        ),
-        drop_database=(
-            overrides.drop_database if overrides.drop_database is not None else config.drop_database
-        ),
         archive=overrides.archive,
+        skip_definer=overrides.skip_definer,
+        automatic_output=automatic_output,
     )
 
 
@@ -180,37 +182,116 @@ def dump_database(options: MysqlDumpOptions) -> Path:
     if not output.parent.is_dir():
         raise click.ClickException(f"Dump output directory does not exist: {output.parent}")
 
-    if not options.archive:
-        dump_database_file(options, output)
-        return output
+    final_output = gzip_output_path(output) if options.archive else output
+    operation_id = uuid.uuid4().hex
+    started_at = time.monotonic()
+    stage = "prepare"
+    last_progress_at = started_at - 1
+    last_progress_bytes = -1
 
-    archive_output = gzip_output_path(output)
-    temporary_output = output.parent / f".dbtalk-mysqldump-{uuid.uuid4().hex}.sql"
+    def report_progress(bytes_count: int, *, force: bool = False) -> None:
+        nonlocal last_progress_at, last_progress_bytes
+        now = time.monotonic()
+        if not force and bytes_count == last_progress_bytes:
+            return
+        if not force and now - last_progress_at < 1:
+            return
+        logger.info(
+            "mysql dump progress operation_id=%s stage=%s elapsed_ms=%d bytes=%d",
+            operation_id,
+            stage,
+            elapsed_ms(started_at),
+            bytes_count,
+        )
+        last_progress_at = now
+        last_progress_bytes = bytes_count
+
+    logger.info(
+        "mysql dump started operation_id=%s stage=%s output=%s",
+        operation_id,
+        stage,
+        final_output,
+    )
+    temporary_sql: Path | None = None
+    temporary_archive: Path | None = None
     try:
-        dump_database_file(options, temporary_output)
-        write_gzip(temporary_output, archive_output)
+        temporary_sql = temporary_path(output.parent, ".sql")
+        stage = "dump"
+        dump_database_file(options, temporary_sql, progress_callback=report_progress)
+        ensure_nonempty(temporary_sql, "mysqldump")
+        report_progress(file_size(temporary_sql), force=True)
+        publish_source = temporary_sql
+        if options.archive:
+            stage = "compress"
+            temporary_archive = temporary_path(output.parent, ".sql.gz")
+            write_gzip(temporary_sql, temporary_archive)
+            ensure_nonempty(temporary_archive, "gzip backup")
+            report_progress(file_size(temporary_archive), force=True)
+            publish_source = temporary_archive
+        stage = "publish"
+        published_output = publish_dump(
+            publish_source,
+            final_output,
+            automatic=options.automatic_output,
+        )
+        output_bytes = file_size(published_output)
+        if output_bytes <= 0:
+            raise click.ClickException("published dump is empty")
+        report_progress(output_bytes, force=True)
+        logger.info(
+            "mysql dump completed operation_id=%s stage=%s elapsed_ms=%d bytes=%d output=%s",
+            operation_id,
+            stage,
+            elapsed_ms(started_at),
+            output_bytes,
+            published_output,
+        )
+        return published_output
+    except Exception as error:
+        logger.error(
+            "mysql dump failed operation_id=%s stage=%s elapsed_ms=%d error=%s",
+            operation_id,
+            stage,
+            elapsed_ms(started_at),
+            sanitize_error_message(str(error)),
+            exc_info=False,
+        )
+        raise
     finally:
-        with contextlib.suppress(OSError):
-            temporary_output.unlink()
-    return archive_output
+        if temporary_sql is not None:
+            with contextlib.suppress(OSError):
+                temporary_sql.unlink()
+        if temporary_archive is not None:
+            with contextlib.suppress(OSError):
+                temporary_archive.unlink()
 
 
-def dump_database_file(options: MysqlDumpOptions, output: Path) -> None:
+def dump_database_file(
+    options: MysqlDumpOptions,
+    output: Path,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
     """Write an uncompressed SQL dump to the supplied path."""
     if shutil.which("mysqldump") is not None:
-        dump_with_local_client(options, output)
+        dump_with_local_client(options, output, progress_callback=progress_callback)
         return
 
     container_id = docker_mapped_mysql_container(options.host, options.port)
     if container_id is not None:
-        dump_with_mapped_container(options, output, container_id)
+        dump_with_mapped_container(
+            options,
+            output,
+            container_id,
+            progress_callback=progress_callback,
+        )
         return
 
     image, reason = docker_mysql_image()
     if image is None:
         raise click.ClickException(f"mysqldump is not available. {reason}")
 
-    dump_with_docker(options, output, image)
+    dump_with_docker(options, output, image, progress_callback=progress_callback)
 
 
 def docker_mapped_mysql_container(host: str, port: int) -> str | None:
@@ -242,15 +323,28 @@ def docker_mapped_mysql_container(host: str, port: int) -> str | None:
     return container_ids[0] if len(container_ids) == 1 else None
 
 
-def dump_with_local_client(options: MysqlDumpOptions, output: Path) -> None:
+def dump_with_local_client(
+    options: MysqlDumpOptions,
+    output: Path,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
     result = run_command(
         mysqldump_command_args(options, output),
         mysql_password_environment(options.password),
+        progress_path=output if progress_callback is not None else None,
+        progress_callback=progress_callback,
     )
     ensure_command_succeeded(result, "mysqldump")
 
 
-def dump_with_mapped_container(options: MysqlDumpOptions, output: Path, container_id: str) -> None:
+def dump_with_mapped_container(
+    options: MysqlDumpOptions,
+    output: Path,
+    container_id: str,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
     """Run mysqldump through the database container's default Unix socket."""
     container_output = f"/tmp/dbtalk-dump-{uuid.uuid4().hex}.sql"
     environment = mysql_password_environment(options.password)
@@ -263,15 +357,25 @@ def dump_with_mapped_container(options: MysqlDumpOptions, output: Path, containe
         *mysqldump_command_args(options, container_output, compress=False),
     ]
     try:
+        if progress_callback is not None:
+            progress_callback(-1)
         ensure_command_succeeded(run_command(command, environment), "Container mysqldump")
         copy_command = ["docker", "cp", f"{container_id}:{container_output}", str(output)]
         ensure_command_succeeded(run_command(copy_command, environment), "Container dump copy")
+        if progress_callback is not None:
+            progress_callback(file_size(output))
     finally:
         with contextlib.suppress(OSError):
             run_command(["docker", "exec", container_id, "rm", "-f", container_output])
 
 
-def dump_with_docker(options: MysqlDumpOptions, output: Path, image: str) -> None:
+def dump_with_docker(
+    options: MysqlDumpOptions,
+    output: Path,
+    image: str,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
     """Run mysqldump in a temporary container and copy the result to the host."""
     container_name = f"dbtalk-mysqldump-{uuid.uuid4().hex}"
     container_options = MysqlDumpOptions(
@@ -281,8 +385,8 @@ def dump_with_docker(options: MysqlDumpOptions, output: Path, image: str) -> Non
         password=options.password,
         database=options.database,
         output=Path(DOCKER_DUMP_PATH),
-        create_database=options.create_database,
-        drop_database=options.drop_database,
+        archive=False,
+        skip_definer=options.skip_definer,
     )
     command = ["docker", "run", "--name", container_name]
     command.extend(docker_host_gateway_args(options.host))
@@ -303,6 +407,8 @@ def dump_with_docker(options: MysqlDumpOptions, output: Path, image: str) -> Non
     environment = mysql_password_environment(options.password)
 
     try:
+        if progress_callback is not None:
+            progress_callback(-1)
         ensure_command_succeeded(run_command(command, environment), "Docker mysqldump")
         copy_command = [
             "docker",
@@ -311,5 +417,68 @@ def dump_with_docker(options: MysqlDumpOptions, output: Path, image: str) -> Non
             str(output),
         ]
         ensure_command_succeeded(run_command(copy_command, environment), "Docker dump copy")
+        if progress_callback is not None:
+            progress_callback(file_size(output))
     finally:
         remove_temporary_container(container_name, environment)
+
+
+def elapsed_ms(started_at: float) -> int:
+    return int((time.monotonic() - started_at) * 1000)
+
+
+def temporary_path(directory: Path, suffix: str) -> Path:
+    try:
+        descriptor, name = tempfile.mkstemp(
+            prefix=".dbtalk-mysqldump-", suffix=suffix, dir=directory
+        )
+    except OSError as error:
+        raise click.ClickException(f"Could not create temporary dump file: {error}") from error
+    os.close(descriptor)
+    return Path(name)
+
+
+def ensure_nonempty(path: Path, source_name: str) -> None:
+    if not path.is_file() or file_size(path) <= 0:
+        raise click.ClickException(f"{source_name} completed without writing a non-empty dump")
+
+
+def _next_available_output(output: Path, *, archive: bool) -> Path:
+    candidate = gzip_output_path(output) if archive else output
+    sequence = 1
+    while candidate.exists():
+        candidate = _sequenced_output(output, sequence)
+        if archive:
+            candidate = gzip_output_path(candidate)
+        sequence += 1
+    return candidate
+
+
+def publish_dump(source: Path, output: Path, *, automatic: bool) -> Path:
+    if not automatic:
+        try:
+            source.replace(output)
+        except OSError as error:
+            raise click.ClickException(f"Could not publish dump: {error}") from error
+        return output
+
+    candidate = output
+    sequence = 1
+    while True:
+        try:
+            os.link(source, candidate)
+            source.unlink()
+            return candidate
+        except FileExistsError:
+            candidate = _sequenced_output(output, sequence)
+            sequence += 1
+        except OSError as error:
+            raise click.ClickException(
+                f"Could not publish dump without overwriting: {error}"
+            ) from error
+
+
+def _sequenced_output(output: Path, sequence: int) -> Path:
+    if output.name.lower().endswith(".sql.gz"):
+        return output.with_name(f"{output.name[: -len('.sql.gz')]}-{sequence}.sql.gz")
+    return output.with_name(f"{output.stem}-{sequence}{output.suffix}")
