@@ -23,8 +23,9 @@ Stage: Requirement
 2. 在默认 dump 模式下，将顶层 `USE` 重定向到显式目标库；restore 不负责创建或删除数据库。
 3. 让 dump 制品以临时文件完成写入、校验后再发布，失败不得污染既有最终制品。
 4. 为 `dbtalk mysql dump` 增加可选 `--skip-definer`；默认不启用，启用时只使用 `mysqldump` 原生能力处理对象定义。
-5. 为 dump/restore 增加统一的结构化生命周期日志：`started`、周期性 `progress`、`completed` 和 `failed`，至少包含 operation id、阶段、耗时和可测量字节数。
+5. 为 dump/restore 增加统一的结构化生命周期日志：`started`、周期性 `progress`、`completed` 和 `failed`，至少包含阶段、耗时和可测量字节数。
 6. 同步 CLI help、MySQL 手册、plugin skill 和自动化测试，消除公开契约与实现漂移。
+7. 当 DSN 指向本机且请求端口唯一对应一个运行中的 Docker MySQL 容器时，dump 和 restore 都直接复用该容器执行原生客户端，避免通过 `host.docker.internal` 绕行。
 
 ## Non-goal
 
@@ -51,7 +52,7 @@ Stage: Requirement
 
 ### 备份审计
 
-运维平台通过 stderr 日志区分任务开始、运行中、完成和失败，并能获得 operation id、输出路径、耗时和字节数。
+运维平台通过 stderr 日志区分任务开始、运行中、完成和失败，并能获得输出路径、耗时和字节数。
 
 ## Acceptance
 
@@ -62,10 +63,11 @@ Stage: Requirement
 - `--skip-definer` 不得通过 `sed` 或其他文本替换实现；客户端不支持该参数时，命令应返回清晰的非零错误，不得静默降级或修改 dump 内容。
 - 显式目标库模式不得执行输入中的 `CREATE DATABASE` 或 `DROP DATABASE`；对于外部或旧 dump 中的此类语句，restore 必须在执行客户端前拒绝并给出清晰错误，不得静默过滤或声称已完成数据库生命周期操作。
 - restore 目标库不存在时，命令返回非零并给出清晰错误，不输出成功消息；目标库创建由独立的 `dbtalk mysql database create` 或其他明确管理流程完成。
+- 当本机端口唯一映射到运行中的 Docker MySQL 容器时，dump/restore 的 native client、restore 目标库预检均通过该容器的默认 Unix socket 执行，不使用 `host.docker.internal`；没有唯一映射容器时才进入本机客户端或 Docker fallback。
 - 普通 `.sql` 和 gzip dump 都先写入同目录临时文件；客户端失败、复制失败、压缩失败或校验失败时，临时文件被清理，既有最终文件不被替换。
 - 自动生成的默认文件名发生同秒冲突时不得覆盖已有制品；显式 `--output` 仍允许用户明确更新固定路径，但更新必须在成功后原子替换。
 - 成功 dump 的最终文件非空。
-- dump/restore 至少输出以下结构化事件，字段使用项目现有 key=value 日志风格：`mysql dump started`、`mysql dump progress`、`mysql dump completed`、`mysql dump failed`，以及对应的 restore 事件。成功事件包含 `operation_id`、`elapsed_ms`、`bytes`；restore 进度包含已处理字节数，dump 在可测量时包含当前制品字节数。
+- dump/restore 至少输出以下结构化事件，字段使用项目现有 key=value 日志风格：`mysql dump started`、`mysql dump progress`、`mysql dump completed`、`mysql dump failed`，以及对应的 restore 事件。成功事件包含 `elapsed_ms`、`bytes`；restore 进度包含已处理字节数，dump 在可测量时包含当前制品字节数。
 - 生命周期日志、标准输出和异常摘要不得包含密码、完整含密码 DSN 或 SQL 制品内容；CLI 标准输出继续只输出最终路径/结果摘要。
 - 单元测试覆盖目标库参数和 `USE` 重写、数据库 DDL 拒绝、`--skip-definer` 默认/启用及各客户端路径、失败时最终文件保护、文件冲突、生命周期日志和敏感信息脱敏；既有测试保持通过。
 - CLI、`docs/mysql.md`、`plugins/dbtalk/skills/dbtalk-mysql/SKILL.md` 与本需求中的参数和语义一致。

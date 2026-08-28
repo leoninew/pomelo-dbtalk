@@ -5,7 +5,6 @@ import logging
 import os
 import shlex
 import shutil
-import subprocess
 import tempfile
 import time
 import uuid
@@ -21,6 +20,7 @@ from dbtalk.settings import MySQLDumpConfig
 from .client import (
     docker_database_host,
     docker_host_gateway_args,
+    docker_mapped_mysql_container,
     docker_mysql_image,
     ensure_command_succeeded,
     file_size,
@@ -183,7 +183,6 @@ def dump_database(options: MysqlDumpOptions) -> Path:
         raise click.ClickException(f"Dump output directory does not exist: {output.parent}")
 
     final_output = gzip_output_path(output) if options.archive else output
-    operation_id = uuid.uuid4().hex
     started_at = time.monotonic()
     stage = "prepare"
     last_progress_at = started_at - 1
@@ -197,8 +196,7 @@ def dump_database(options: MysqlDumpOptions) -> Path:
         if not force and now - last_progress_at < 1:
             return
         logger.info(
-            "mysql dump progress operation_id=%s stage=%s elapsed_ms=%d bytes=%d",
-            operation_id,
+            "mysql dump progress stage=%s elapsed_ms=%d bytes=%d",
             stage,
             elapsed_ms(started_at),
             bytes_count,
@@ -207,8 +205,7 @@ def dump_database(options: MysqlDumpOptions) -> Path:
         last_progress_bytes = bytes_count
 
     logger.info(
-        "mysql dump started operation_id=%s stage=%s output=%s",
-        operation_id,
+        "mysql dump started stage=%s output=%s",
         stage,
         final_output,
     )
@@ -239,8 +236,7 @@ def dump_database(options: MysqlDumpOptions) -> Path:
             raise click.ClickException("published dump is empty")
         report_progress(output_bytes, force=True)
         logger.info(
-            "mysql dump completed operation_id=%s stage=%s elapsed_ms=%d bytes=%d output=%s",
-            operation_id,
+            "mysql dump completed stage=%s elapsed_ms=%d bytes=%d output=%s",
             stage,
             elapsed_ms(started_at),
             output_bytes,
@@ -249,8 +245,7 @@ def dump_database(options: MysqlDumpOptions) -> Path:
         return published_output
     except Exception as error:
         logger.error(
-            "mysql dump failed operation_id=%s stage=%s elapsed_ms=%d error=%s",
-            operation_id,
+            "mysql dump failed stage=%s elapsed_ms=%d error=%s",
             stage,
             elapsed_ms(started_at),
             sanitize_error_message(str(error)),
@@ -273,10 +268,6 @@ def dump_database_file(
     progress_callback: ProgressCallback | None = None,
 ) -> None:
     """Write an uncompressed SQL dump to the supplied path."""
-    if shutil.which("mysqldump") is not None:
-        dump_with_local_client(options, output, progress_callback=progress_callback)
-        return
-
     container_id = docker_mapped_mysql_container(options.host, options.port)
     if container_id is not None:
         dump_with_mapped_container(
@@ -287,40 +278,15 @@ def dump_database_file(
         )
         return
 
+    if shutil.which("mysqldump") is not None:
+        dump_with_local_client(options, output, progress_callback=progress_callback)
+        return
+
     image, reason = docker_mysql_image()
     if image is None:
         raise click.ClickException(f"mysqldump is not available. {reason}")
 
     dump_with_docker(options, output, image, progress_callback=progress_callback)
-
-
-def docker_mapped_mysql_container(host: str, port: int) -> str | None:
-    """Return the sole running container that publishes a local MySQL port."""
-    if not is_local_mysql_host(host):
-        return None
-
-    try:
-        listed = subprocess.run(
-            [
-                "docker",
-                "ps",
-                "--quiet",
-                "--filter",
-                "status=running",
-                "--filter",
-                f"publish={port}",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
-        return None
-    if listed.returncode != 0:
-        return None
-
-    container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
-    return container_ids[0] if len(container_ids) == 1 else None
 
 
 def dump_with_local_client(

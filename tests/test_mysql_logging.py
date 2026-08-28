@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -35,6 +34,7 @@ def test_dump_lifecycle_logs_include_operation_and_final_bytes(
         return CompletedProcess(command, 0, "", "")
 
     with (
+        patch("dbtalk.mysql.dump.docker_mapped_mysql_container", return_value=None),
         patch("dbtalk.mysql.dump.shutil.which", return_value="mysqldump"),
         patch("dbtalk.mysql.dump.run_command", side_effect=write_dump),
         caplog.at_level(logging.INFO, logger="dbtalk"),
@@ -43,12 +43,6 @@ def test_dump_lifecycle_logs_include_operation_and_final_bytes(
 
     messages = [record.getMessage() for record in caplog.records]
     lifecycle = [message for message in messages if message.startswith("mysql dump ")]
-    operation_ids = {
-        match.group(1)
-        for message in lifecycle
-        if (match := re.search(r"operation_id=([^ ]+)", message))
-    }
-
     assert result == output.resolve()
     assert any(message.startswith("mysql dump started ") for message in lifecycle)
     assert any(message.startswith("mysql dump progress ") for message in lifecycle)
@@ -58,7 +52,6 @@ def test_dump_lifecycle_logs_include_operation_and_final_bytes(
     assert "elapsed_ms=" in completed
     assert "bytes=12" in completed
     assert "output=" in completed
-    assert len(operation_ids) == 1
 
 
 def test_restore_lifecycle_logs_are_sanitized_and_preflighted(

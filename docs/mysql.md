@@ -78,11 +78,11 @@ uv run dbtalk mysql restore `
 
 目标库必须在 restore 前由独立的 `dbtalk mysql database create` 或其他明确流程创建。restore 会先检查目标库存在，再拒绝输入中的 `CREATE DATABASE` 或 `DROP DATABASE`，并只将顶层 `USE` 重写为目标库；不会修改原始输入文件。restore 可能覆盖或删除现有数据，执行前确认目标连接、输入来源和写入授权。
 
-dump 和 restore 会在 stderr 输出 `started`、`progress`、`completed` 和 `failed` 生命周期日志，包含 operation id、阶段、耗时和可测量字节数；stdout 只输出最终路径或结果摘要。日志和错误不会输出密码、完整含密码 DSN 或 SQL 内容。
+dump 和 restore 会在 stderr 输出 `started`、`progress`、`completed` 和 `failed` 生命周期日志，包含阶段、耗时和可测量字节数；stdout 只输出最终路径或结果摘要。日志和错误不会输出密码、完整含密码 DSN 或 SQL 内容。
 
 ## 客户端与故障处理
 
-`dbtalk` 优先使用本机 `mysqldump`。本机客户端缺失且 DSN 使用 `localhost` 或 `127.0.0.1` 时，若该发布端口唯一对应一个运行中的 Docker 容器，`dbtalk` 直接在该容器中执行 `mysqldump`，通过默认 Unix socket 连接，并将文件复制到请求的宿主机输出路径。无法唯一识别容器时，才使用本机已有的 Docker `mysql` 镜像，通过 `host.docker.internal` 访问另一服务。不会安装客户端、拉取镜像、创建数据库或猜测容器。
+对于使用 `localhost` 或 `127.0.0.1` 的 DSN，若请求端口唯一对应一个运行中的 Docker 容器，dump 和 restore 都直接在该数据库容器中执行原生 MySQL 客户端，通过默认 Unix socket 连接，不经过 `host.docker.internal`。dump 完成后将制品复制到请求的宿主机路径，restore 通过 stdin 将输入流送入该容器。未识别到唯一映射容器时，才使用本机客户端；本机客户端也不可用时，使用本地已有的 Docker `mysql` 镜像，通过 `host.docker.internal` 访问另一服务。不会安装客户端、拉取镜像、创建数据库或猜测容器。
 
 ## 用户与授权
 

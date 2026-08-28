@@ -5,7 +5,7 @@ Stage: Verification
 ---
 
 # MySQL dump/restore 生产可用性改进验证
-最后修改时间: 2026-08-28 11:34:01
+最后修改时间: 2026-08-28 12:57:22
 
 ## Requirement alignment
 
@@ -19,7 +19,7 @@ standard 模式不单独创建 Spec，本次按已接受的 Plan 验证。Plan �
 
 实际变更集中在 MySQL dump/restore、配置契约、CLI 文档、plugin skill 和测试：
 
-- `src/dbtalk/mysql/cli.py`、`dump.py`、`restore.py`、`client.py`：新增 restore 目标库边界、`--skip-definer`、临时制品发布、进度和生命周期日志。
+- `src/dbtalk/mysql/cli.py`、`dump.py`、`restore.py`、`client.py`：新增 restore 目标库边界、`--skip-definer`、临时制品发布、进度和生命周期日志，并共享本机映射容器发现与直连路径。
 - `src/dbtalk/settings.py`、`dbtalk.yaml`、`.env.example`：同步 dump/restore 配置契约。
 - `docs/mysql.md`、`plugins/dbtalk/skills/dbtalk-mysql/SKILL.md`：同步公开用法和安全边界。
 - `tests/test_mysql.py`、`tests/test_mysql_logging.py`、`tests/test_settings.py`：覆盖参数、路径、失败保护、目标库、DDL 拒绝和日志行为。
@@ -36,9 +36,10 @@ Plan 预期修改的源码、配置、文档和测试文件均已覆盖；另外
 - [x] dump 使用 `-B` 和 `--no-create-db`；真实 dump 含 1 条 `USE`，未发现 `CREATE DATABASE` 或 `DROP DATABASE`。
 - [x] restore 使用独立目标库；真实流程从 `pomelo_orbit` 恢复到新建的 `dbtalk_it_01569b415855`，目标库未覆盖已有库。
 - [x] restore 目标库预检、`USE` 重写、原始输入保护和数据库生命周期 DDL 拒绝由定向测试覆盖。
+- [x] 本机端口唯一映射到 Docker MySQL 容器时，dump/restore 的预检和 native client 均通过该容器 Unix socket；无映射时保留 Docker fallback，由定向测试覆盖。
 - [x] dump 默认保留 `DEFINER`，`--skip-definer` 在三条客户端路径的透传和不支持参数失败由测试覆盖。
 - [x] 普通 SQL/gzip 临时文件、非空检查、自动命名冲突、原子发布和失败清理由测试覆盖。
-- [x] dump/restore 生命周期日志包含 operation id、阶段、耗时和字节数；敏感信息脱敏由测试覆盖。
+- [x] dump/restore 生命周期日志包含阶段、耗时和字节数；敏感信息脱敏由测试覆盖。
 - [x] CLI 文档、plugin skill、配置和测试契约已同步。
 
 ## Test results
@@ -46,8 +47,8 @@ Plan 预期修改的源码、配置、文档和测试文件均已覆盖；另外
 工作目录：`D:\SourceCodes\mywork\pomelo-dbtalk`
 
 - `make check`：通过。Ruff format 检查 58 个文件，Ruff lint 通过，mypy 检查 58 个文件无问题。
-- `make test`：通过，`188 passed, 1 skipped`，耗时 85.37 秒。跳过项是仓库原有的手工集成入口，因未设置 `DBTALK_RUN_INTEGRATION=1`。
-- `uv run --locked --no-sync pytest tests/test_mysql.py tests/test_mysql_logging.py tests/test_settings.py tests/test_unit_boundaries.py -q`：通过，`60 passed, 5 subtests passed`。
+- `make test`：通过，`189 passed, 1 skipped`。跳过项是仓库原有的手工集成入口，因未设置 `DBTALK_RUN_INTEGRATION=1`。
+- `uv run --locked --no-sync pytest tests/test_mysql.py tests/test_mysql_logging.py tests/test_settings.py tests/test_unit_boundaries.py -q`：通过，`61 passed, 5 subtests passed`。
 - `uv run dbtalk mysql dump --help` 与 `uv run dbtalk mysql restore --help`：通过，CLI 参数符合新契约。
 - `git diff --check`：通过。
 
@@ -63,9 +64,9 @@ Plan 预期修改的源码、配置、文档和测试文件均已覆盖；另外
 
 ## Missed or expanded scope
 
-仓库全量测试中的手工集成函数仍按默认配置跳过；本次已用独立实际 CLI 流程完成更完整的本地 3306 dump、create、restore 和校验。由于本地客户端不支持 `--skip-definer`，未能验证该选项成功生成制品，仅验证了清晰失败和无制品发布行为。
+仓库全量测试中的手工集成函数仍按默认配置跳过；此前已用独立实际 CLI 流程完成本地 3306 dump、create、restore 和校验。由于本地客户端不支持 `--skip-definer`，未能验证该选项成功生成制品，仅验证了清晰失败和无制品发布行为。
 
-未执行真实的 DDL 拒绝场景和本机 `mysql` 客户端路径；前者已有导入客户端前的定向单元测试，后者当前环境未安装宿主机 `mysql`/`mysqldump`，实际流程验证了 Docker fallback/mapped container 路径。
+本次新增的 mapped-container restore 已由定向测试覆盖；由于当前验证进程没有 `DBTALK_IT_DSN` 且 `.env` 未提供该变量，尚未重新执行新增代码的真实 Docker restore。宿主机仍未安装 `mysql`/`mysqldump`。
 
 ## Risks and incomplete items
 
@@ -75,4 +76,4 @@ Plan 预期修改的源码、配置、文档和测试文件均已覆盖；另外
 
 ## Conclusion
 
-Requirement 和 Plan 的主要验收项已通过，源码质量检查、全量单元测试、定向测试和本地 MySQL 3306 端到端 dump/create/restore 均成功。剩余事项均为计划中明确的环境相关验证边界，不构成当前实现失败。
+Requirement 和 Plan 的主要验收项已通过，源码质量检查、全量单元测试和定向测试均成功；本机 Docker mapped-container restore 的真实复测待补充 DSN 后执行。此前的本地 MySQL 3306 端到端 dump/create/restore 记录仍保留，但不替代本次新增路径的真实复测。

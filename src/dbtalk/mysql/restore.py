@@ -21,6 +21,7 @@ from dbtalk.settings import MySQLRestoreConfig
 from .client import (
     docker_database_host,
     docker_host_gateway_args,
+    docker_mapped_mysql_container,
     docker_mysql_image,
     ensure_command_succeeded,
     file_size,
@@ -262,7 +263,6 @@ def restore_database(options: MysqlRestoreOptions) -> Path:
     if not options.database:
         raise click.ClickException("Restore target database is required")
 
-    operation_id = uuid.uuid4().hex
     started_at = time.monotonic()
     stage = "prepare"
     last_progress_at = started_at - 1
@@ -276,8 +276,7 @@ def restore_database(options: MysqlRestoreOptions) -> Path:
         if not force and now - last_progress_at < 1:
             return
         logger.info(
-            "mysql restore progress operation_id=%s stage=%s elapsed_ms=%d bytes=%d",
-            operation_id,
+            "mysql restore progress stage=%s elapsed_ms=%d bytes=%d",
             stage,
             elapsed_ms(started_at),
             bytes_count,
@@ -286,8 +285,7 @@ def restore_database(options: MysqlRestoreOptions) -> Path:
         last_progress_bytes = bytes_count
 
     logger.info(
-        "mysql restore started operation_id=%s stage=%s input=%s database=%s",
-        operation_id,
+        "mysql restore started stage=%s input=%s database=%s",
         stage,
         input_path,
         options.database,
@@ -300,7 +298,17 @@ def restore_database(options: MysqlRestoreOptions) -> Path:
             restore_input = rebased_input or extracted_input
             input_bytes = file_size(restore_input)
             report_progress(input_bytes, force=True)
-            if shutil.which("mysql") is not None:
+            container_id = docker_mapped_mysql_container(options.host, options.port)
+            if container_id is not None:
+                verify_target_database_with_mapped_container(options, container_id)
+                stage = "restore"
+                restore_with_mapped_container(
+                    options,
+                    restore_input,
+                    container_id,
+                    progress_callback=report_progress,
+                )
+            elif shutil.which("mysql") is not None:
                 verify_target_database_with_local_client(options)
                 stage = "restore"
                 restore_with_local_client(options, restore_input, progress_callback=report_progress)
@@ -318,8 +326,7 @@ def restore_database(options: MysqlRestoreOptions) -> Path:
                 )
             report_progress(input_bytes, force=True)
             logger.info(
-                "mysql restore completed operation_id=%s stage=%s elapsed_ms=%d bytes=%d input=%s",
-                operation_id,
+                "mysql restore completed stage=%s elapsed_ms=%d bytes=%d input=%s",
                 stage,
                 elapsed_ms(started_at),
                 input_bytes,
@@ -328,8 +335,7 @@ def restore_database(options: MysqlRestoreOptions) -> Path:
             return input_path
     except Exception as error:
         logger.error(
-            "mysql restore failed operation_id=%s stage=%s elapsed_ms=%d error=%s",
-            operation_id,
+            "mysql restore failed stage=%s elapsed_ms=%d error=%s",
             stage,
             elapsed_ms(started_at),
             sanitize_error_message(str(error)),
@@ -412,6 +418,32 @@ def restore_with_local_client(
     ensure_command_succeeded(result, "mysql restore")
 
 
+def restore_with_mapped_container(
+    options: MysqlRestoreOptions,
+    input_path: Path,
+    container_id: str,
+    *,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
+    """Stream a SQL dump into the MySQL client inside the mapped database container."""
+    command = [
+        "docker",
+        "exec",
+        "-i",
+        "--env",
+        "MYSQL_PWD",
+        container_id,
+        *mysql_restore_command_args(options),
+    ]
+    result = run_command(
+        command,
+        mysql_password_environment(options.password),
+        input_path=input_path,
+        progress_callback=progress_callback,
+    )
+    ensure_command_succeeded(result, "Container mysql restore")
+
+
 def restore_with_docker(
     options: MysqlRestoreOptions,
     input_path: Path,
@@ -466,6 +498,25 @@ def verify_target_database_with_local_client(options: MysqlRestoreOptions) -> No
         ],
         mysql_password_environment(options.password),
     )
+    ensure_target_database_succeeded(result, options.database or "")
+
+
+def verify_target_database_with_mapped_container(
+    options: MysqlRestoreOptions, container_id: str
+) -> None:
+    command = [
+        "docker",
+        "exec",
+        "--env",
+        "MYSQL_PWD",
+        container_id,
+        *mysql_restore_command_args(options),
+        "--batch",
+        "--skip-column-names",
+        "--execute",
+        "SELECT 1",
+    ]
+    result = run_command(command, mysql_password_environment(options.password))
     ensure_target_database_succeeded(result, options.database or "")
 
 

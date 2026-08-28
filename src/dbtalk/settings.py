@@ -130,7 +130,7 @@ def bool_config(value: object) -> bool:
 def load_logging_settings(value: Any) -> LoggingSettings:
     config = mapping_config(value)
     level = config.get("level", "INFO")
-    log_format = config.get("format", "%(levelname)s %(name)s: %(message)s")
+    log_format = config.get("format", "%(asctime)s %(levelname)s %(name)s: %(message)s")
     assert isinstance(level, str)
     assert isinstance(log_format, str)
     return LoggingSettings(level=level, format=log_format)

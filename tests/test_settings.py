@@ -13,7 +13,7 @@ from dbtalk.settings import load_settings
 DEFAULT_SETTINGS = """verbose: false
 logging:
   level: INFO
-  format: "%(levelname)s %(name)s: %(message)s"
+  format: "%(asctime)s %(levelname)s %(name)s: %(message)s"
 mysqldump:
   host: localhost
   port: 3306
@@ -65,7 +65,7 @@ def test_loads_yaml_settings(tmp_path: Path) -> None:
     assert settings.postgres.output_directory == "data"
     assert settings.postgres.client_image == "postgres:18"
     assert settings.logging.level == "INFO"
-    assert settings.logging.format == "%(levelname)s %(name)s: %(message)s"
+    assert settings.logging.format == "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
 def test_mysql_dump_settings_do_not_expose_database_lifecycle_switches(

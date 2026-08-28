@@ -126,6 +126,35 @@ def docker_mysql_image() -> tuple[str | None, str]:
     return None, "No local MySQL Docker image is available."
 
 
+def docker_mapped_mysql_container(host: str, port: int) -> str | None:
+    """Return the sole running container that publishes a local MySQL port."""
+    if not is_local_mysql_host(host):
+        return None
+
+    try:
+        listed = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "--quiet",
+                "--filter",
+                "status=running",
+                "--filter",
+                f"publish={port}",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if listed.returncode != 0:
+        return None
+
+    container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    return container_ids[0] if len(container_ids) == 1 else None
+
+
 def docker_database_host(host: str) -> str:
     if is_local_mysql_host(host):
         return "host.docker.internal"

@@ -3,7 +3,7 @@ verbose: false
 
 logging:
   level: INFO
-  format: "%(levelname)s %(name)s: %(message)s"
+  format: "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 mysqldump:
   host: localhost

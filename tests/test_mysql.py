@@ -27,7 +27,7 @@ from dbtalk.mysql.cli import (
     resolve_restore_options,
     restore_database,
 )
-from dbtalk.mysql.dump import docker_mapped_mysql_container
+from dbtalk.mysql.client import docker_mapped_mysql_container
 from dbtalk.settings import MySQLDumpConfig, MySQLRestoreConfig
 
 
@@ -257,7 +257,7 @@ class MysqlCommandTests(unittest.TestCase):
                 "dbtalk.mysql.dump.docker_mapped_mysql_container",
                 return_value="mysql-server",
             ),
-            patch("dbtalk.mysql.dump.shutil.which", return_value=None) as which,
+            patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump") as which,
             patch(
                 "dbtalk.mysql.dump.run_command",
                 side_effect=run_docker,
@@ -266,7 +266,7 @@ class MysqlCommandTests(unittest.TestCase):
             output = dump_database(options)
 
         self.assertEqual(output, Path("backup.sql").resolve())
-        which.assert_called_once_with("mysqldump")
+        which.assert_not_called()
         dump_command = run.call_args_list[0].args[0]
         self.assertEqual(
             dump_command[:7],
@@ -296,7 +296,7 @@ class MysqlCommandTests(unittest.TestCase):
     def test_docker_mapped_mysql_container_matches_the_requested_host_port(self) -> None:
         listed = CompletedProcess([], 0, "mysql-server\n", "")
         with (
-            patch("dbtalk.mysql.dump.subprocess.run", return_value=listed),
+            patch("dbtalk.mysql.client.subprocess.run", return_value=listed),
         ):
             container_id = docker_mapped_mysql_container("localhost", 3306)
 
@@ -306,8 +306,7 @@ class MysqlCommandTests(unittest.TestCase):
         listed = CompletedProcess([], 0, "mysql-one\nmysql-two\n", "")
 
         with (
-            patch("dbtalk.mysql.dump.shutil.which", return_value="docker"),
-            patch("dbtalk.mysql.dump.subprocess.run", return_value=listed) as run,
+            patch("dbtalk.mysql.client.subprocess.run", return_value=listed) as run,
         ):
             container_id = docker_mapped_mysql_container("localhost", 3306)
 
@@ -316,7 +315,7 @@ class MysqlCommandTests(unittest.TestCase):
 
     def test_docker_mapped_mysql_container_handles_a_docker_start_failure(self) -> None:
         with (
-            patch("dbtalk.mysql.dump.subprocess.run", side_effect=OSError("unavailable")),
+            patch("dbtalk.mysql.client.subprocess.run", side_effect=OSError("unavailable")),
         ):
             container_id = docker_mapped_mysql_container("localhost", 3306)
 
@@ -532,6 +531,7 @@ class MysqlCommandTests(unittest.TestCase):
                 return CompletedProcess(command, 1, "", "network failure")
 
             with (
+                patch("dbtalk.mysql.dump.docker_mapped_mysql_container", return_value=None),
                 patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
                 patch("dbtalk.mysql.dump.run_command", side_effect=fail_dump),
                 self.assertRaisesRegex(click.ClickException, "network failure"),
@@ -564,6 +564,7 @@ class MysqlCommandTests(unittest.TestCase):
                 return CompletedProcess(command, 0, "", "")
 
             with (
+                patch("dbtalk.mysql.dump.docker_mapped_mysql_container", return_value=None),
                 patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
                 patch("dbtalk.mysql.dump.run_command", side_effect=write_dump),
             ):
@@ -587,6 +588,7 @@ class MysqlCommandTests(unittest.TestCase):
             )
 
             with (
+                patch("dbtalk.mysql.dump.docker_mapped_mysql_container", return_value=None),
                 patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
                 patch(
                     "dbtalk.mysql.dump.run_command",
@@ -613,6 +615,7 @@ class MysqlCommandTests(unittest.TestCase):
             )
 
             with (
+                patch("dbtalk.mysql.dump.docker_mapped_mysql_container", return_value=None),
                 patch("dbtalk.mysql.dump.shutil.which", return_value="/usr/bin/mysqldump"),
                 patch(
                     "dbtalk.mysql.dump.run_command",
@@ -762,6 +765,7 @@ class MysqlCommandTests(unittest.TestCase):
                     "dbtalk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
+                patch("dbtalk.mysql.restore.docker_mapped_mysql_container", return_value=None),
                 patch(
                     "dbtalk.mysql.restore.run_command",
                     return_value=CompletedProcess([], 0, "", ""),
@@ -846,6 +850,7 @@ class MysqlCommandTests(unittest.TestCase):
                     "dbtalk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
+                patch("dbtalk.mysql.restore.docker_mapped_mysql_container", return_value=None),
                 patch("dbtalk.mysql.restore.run_command", side_effect=read_dump),
             ):
                 restored = restore_database(options)
@@ -893,6 +898,7 @@ class MysqlCommandTests(unittest.TestCase):
                     "dbtalk.mysql.restore.shutil.which",
                     return_value="/usr/bin/mysql",
                 ),
+                patch("dbtalk.mysql.restore.docker_mapped_mysql_container", return_value=None),
                 patch(
                     "dbtalk.mysql.restore.run_command",
                     side_effect=capture_input,
@@ -937,6 +943,10 @@ class MysqlCommandTests(unittest.TestCase):
                     )
                     with (
                         patch("dbtalk.mysql.restore.shutil.which", return_value="/usr/bin/mysql"),
+                        patch(
+                            "dbtalk.mysql.restore.docker_mapped_mysql_container",
+                            return_value=None,
+                        ),
                         patch("dbtalk.mysql.restore.run_command") as run,
                         self.assertRaisesRegex(
                             click.ClickException,
@@ -966,6 +976,7 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch("dbtalk.mysql.restore.shutil.which", return_value="/usr/bin/mysql"),
+                patch("dbtalk.mysql.restore.docker_mapped_mysql_container", return_value=None),
                 patch(
                     "dbtalk.mysql.restore.run_command",
                     return_value=CompletedProcess([], 0, "", ""),
@@ -973,6 +984,80 @@ class MysqlCommandTests(unittest.TestCase):
             ):
                 restore_database(options)
 
+            self.assertEqual(run.call_count, 2)
+
+    def test_restore_database_uses_mapped_mysql_container_before_other_clients(self) -> None:
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            input_path = Path("backup.sql")
+            input_path.write_text("SELECT 1;\n", encoding="utf-8")
+            options = MysqlRestoreOptions(
+                host="localhost",
+                port=3306,
+                user="root",
+                password="secret",
+                input=input_path,
+                database="target_database",
+            )
+            success = CompletedProcess([], 0, "", "")
+
+            with (
+                patch(
+                    "dbtalk.mysql.restore.docker_mapped_mysql_container",
+                    return_value="mysql-server",
+                ) as mapped,
+                patch("dbtalk.mysql.restore.shutil.which", return_value="/usr/bin/mysql") as which,
+                patch("dbtalk.mysql.restore.docker_mysql_image") as image,
+                patch("dbtalk.mysql.restore.run_command", return_value=success) as run,
+            ):
+                restored_input = restore_database(options)
+
+            self.assertEqual(restored_input, input_path.resolve())
+            mapped.assert_called_once_with("localhost", 3306)
+            which.assert_not_called()
+            image.assert_not_called()
+            probe_command = run.call_args_list[0].args[0]
+            self.assertEqual(
+                probe_command,
+                [
+                    "docker",
+                    "exec",
+                    "--env",
+                    "MYSQL_PWD",
+                    "mysql-server",
+                    "mysql",
+                    "-u",
+                    "root",
+                    "--database",
+                    "target_database",
+                    "--batch",
+                    "--skip-column-names",
+                    "--execute",
+                    "SELECT 1",
+                ],
+            )
+            restore_command = run.call_args_list[1].args[0]
+            self.assertEqual(
+                restore_command,
+                [
+                    "docker",
+                    "exec",
+                    "-i",
+                    "--env",
+                    "MYSQL_PWD",
+                    "mysql-server",
+                    "mysql",
+                    "-u",
+                    "root",
+                    "--database",
+                    "target_database",
+                ],
+            )
+            self.assertNotIn("host.docker.internal", restore_command)
+            self.assertNotIn("secret", restore_command)
+            self.assertEqual(run.call_args_list[1].args[1]["MYSQL_PWD"], "secret")
+            self.assertEqual(run.call_args_list[1].kwargs["input_path"], input_path.resolve())
             self.assertEqual(run.call_count, 2)
 
     def test_restore_rejects_missing_target_database_before_import(self) -> None:
@@ -1026,6 +1111,7 @@ class MysqlCommandTests(unittest.TestCase):
 
             with (
                 patch("dbtalk.mysql.restore.shutil.which", return_value=None),
+                patch("dbtalk.mysql.restore.docker_mapped_mysql_container", return_value=None),
                 patch(
                     "dbtalk.mysql.restore.docker_mysql_image",
                     return_value=("mysql:8.4", ""),
@@ -1072,6 +1158,7 @@ class MysqlCommandTests(unittest.TestCase):
             message = "mysql is not available. Docker is not installed or is not on PATH."
             with (
                 patch("dbtalk.mysql.restore.shutil.which", return_value=None),
+                patch("dbtalk.mysql.restore.docker_mapped_mysql_container", return_value=None),
                 patch(
                     "dbtalk.mysql.restore.docker_mysql_image",
                     return_value=(None, "Docker is not installed or is not on PATH."),

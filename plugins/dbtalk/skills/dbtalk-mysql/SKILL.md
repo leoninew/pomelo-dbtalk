@@ -9,7 +9,7 @@ description: 使用 dbtalk mysql 管理 MySQL database、user、固定 profile �
 
 ## Dump 执行语义
 
-`dbtalk mysql dump` 优先调用当前机器上的 `mysqldump`。本机客户端缺失且 DSN 指向调用机的 `localhost` 或 `127.0.0.1` 时，若该发布端口唯一对应一个运行中的 Docker 容器，`dbtalk` 直接在该容器中运行 `mysqldump`，默认通过 Unix socket 连接，并将 SQL 文件复制到调用机指定的输出路径。无法唯一识别容器时，才回退到该机器已有的 Docker `mysql` 镜像。MySQL 服务器不需要安装 dbtalk。
+`dbtalk mysql dump` 对调用机的 `localhost` 或 `127.0.0.1` 先检查请求端口是否唯一对应一个运行中的 Docker 容器；若是，直接在该容器中运行 `mysqldump`，默认通过 Unix socket 连接，并将 SQL 文件复制到调用机指定的输出路径。未识别到唯一映射容器时，才调用当前机器上的 `mysqldump`；本机客户端也不可用时，再回退到该机器已有的 Docker `mysql` 镜像。MySQL 服务器不需要安装 dbtalk。
 
 DSN 的 host 从当前执行机解释。`localhost` 或 `127.0.0.1` 指向当前执行机本身；只有 Docker 明确显示该端口唯一映射到运行中容器时，才使用该容器内的 socket 连接。一次 SQL dump 请求只授权执行该 dump；不应为远端 DSN 更换命令执行位置、猜测容器或安排其他连接方式。连接或客户端失败时，报告 dbtalk 的失败结果并停止。
 
@@ -60,7 +60,9 @@ dbtalk mysql restore --dsn-env DBTALK_APP_DSN --database app --input .\data\app-
 
 `--database TARGET` 优先于 `mysqlrestore.database` 和 DSN database。DSN 仍必须包含 database，用于连接维护库；目标库由 restore 前的只读探测确认存在。输入中的 `CREATE DATABASE` 或 `DROP DATABASE` 会在导入客户端启动前被拒绝，不能依靠 restore 执行数据库生命周期操作。存在的顶层 `USE` 只在临时输入中重写为目标库，原始 dump 文件不会修改。
 
-restore 会覆盖或删除 dump 中同名表及数据，不能整体回滚。完成后确认命令成功退出，并按需检查目标表数或代表性数据。 dump/restore 的 stderr 生命周期日志包含 `operation_id`、阶段、`elapsed_ms` 和字节数；stdout 只输出最终路径或结果摘要。
+restore 会覆盖或删除 dump 中同名表及数据，不能整体回滚。完成后确认命令成功退出，并按需检查目标表数或代表性数据。 dump/restore 的 stderr 生命周期日志包含阶段、`elapsed_ms` 和字节数；stdout 只输出最终路径或结果摘要。
+
+当 DSN 指向本机且请求端口唯一对应一个运行中的 Docker 容器时，restore 的目标库预检和实际导入都在该容器内通过 `docker exec` 使用默认 Unix socket；只有未识别到唯一映射容器时，才使用宿主机 `mysql` 或临时 Docker client fallback。
 
 ## 运行路径与故障处理
 
