@@ -1,0 +1,153 @@
+name: Release wheel
+
+# Replace these project values.
+env:
+  PROJECT_NAME: "dbtalk"
+  PACKAGE_IMPORT: "dbtalk"
+  RELEASE_COMMAND: "dbtalk"
+  TAG_PATTERN: &tag_pattern "v*"
+  PYTHON_VERSION: "3.12"
+
+on:
+  push:
+    tags: [*tag_pattern]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Git tag to release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wheel-release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build wheel
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Verify checked out tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+
+      - name: Verify dependency lock
+        run: uv lock --check
+
+      - name: Install locked dependencies
+        run: uv sync --all-groups --locked
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Verify wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import email.parser
+          import os
+          import pathlib
+          import re
+          import tomllib
+          import zipfile
+
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          expected_version = os.environ["RELEASE_TAG"].removeprefix("v")
+          if project["name"] != os.environ["PROJECT_NAME"]:
+              raise SystemExit("PROJECT_NAME does not match pyproject.toml")
+          if project["version"] != expected_version:
+              raise SystemExit(
+                  f"release tag {os.environ['RELEASE_TAG']!r} does not match project version {project['version']!r}"
+              )
+
+          wheels = list(pathlib.Path("dist").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected exactly one wheel, found {len(wheels)}")
+          wheel = wheels[0]
+          normalized_name = re.sub(r"[-_.]+", "_", project["name"]).lower()
+          expected_prefix = f"{normalized_name}-{expected_version.replace('-', '_')}-"
+          if not wheel.name.lower().startswith(expected_prefix):
+              raise SystemExit(f"wheel filename {wheel.name!r} does not start with {expected_prefix!r}")
+
+          package_path = os.environ["PACKAGE_IMPORT"].replace(".", "/") + "/"
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              if not any(name.startswith(package_path) for name in names):
+                  raise SystemExit(f"wheel does not contain {package_path!r}")
+              metadata_name = next((name for name in names if name.endswith(".dist-info/METADATA")), None)
+              if metadata_name is None:
+                  raise SystemExit("wheel has no dist-info/METADATA")
+              metadata = email.parser.Parser().parsestr(archive.read(metadata_name).decode("utf-8"))
+          if metadata["Name"] != project["name"] or metadata["Version"] != expected_version:
+              raise SystemExit("wheel metadata does not match the release")
+          print(f"validated {wheel.name} for tag {os.environ['RELEASE_TAG']}")
+          PY
+
+      - name: Smoke test wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          check_dir="$RUNNER_TEMP/wheel-check"
+          python -m venv "$check_dir"
+          check_python="$check_dir/bin/python"
+          "$check_python" -m pip install --disable-pip-version-check --no-input "$wheel"
+          "$check_python" -c "import importlib; importlib.import_module('$PACKAGE_IMPORT')"
+          "$check_dir/bin/$RELEASE_COMMAND" --help >/dev/null
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-wheel-${{ env.RELEASE_TAG }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Create Release and upload wheel
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-wheel-${{ env.RELEASE_TAG }}
+          path: dist
+
+      - name: Create Release and upload wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.whl \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.whl \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes

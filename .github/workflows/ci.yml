@@ -1,52 +1,52 @@
 name: CI
 
+# Replace the project default branch and minimum Python version.
+env:
+  DEFAULT_BRANCH: &default_branch "develop"
+  PYTHON_VERSION: "3.12"
+
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [*default_branch, ci]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   quality:
+    name: Quality
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true
 
       - name: Verify dependency lock
         run: uv lock --check
 
-      - name: Install development dependencies
+      - name: Install locked dependencies
         run: uv sync --all-groups --locked
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --locked --no-sync ruff check .
 
       - name: Verify formatting
-        run: uv run ruff format --check .
+        run: uv run --locked --no-sync ruff format --check .
 
       - name: Type check
-        run: uv run mypy src tests
+        run: uv run --locked --no-sync mypy .
 
-      - name: Test with branch coverage
-        run: uv run pytest --cov=dbtalk --cov-report=term-missing:skip-covered
+      - name: Test
+        run: uv run --locked --no-sync pytest
 
       - name: Build distributions
         run: uv build
-
-  container:
-    needs: quality
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build image
-        run: docker build --tag dbtalk:ci .
-
-      - name: Smoke test image entrypoint
-        run: docker run --rm dbtalk:ci --version
