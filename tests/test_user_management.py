@@ -150,7 +150,7 @@ def test_mysql_profile_quotes_database_and_protects_current_identity(
     assert protected_connection.statements == ["SELECT CURRENT_USER()"]
 
 
-@pytest.mark.parametrize("host", ["%", "api_%", "bad host", "bad\nname"])
+@pytest.mark.parametrize("host", ["api_%", "bad host", "bad\nname"])
 def test_mysql_host_validation_happens_before_connecting(
     monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
@@ -161,6 +161,21 @@ def test_mysql_host_validation_happens_before_connecting(
         mysql_user.disable_user(mysql_dsn(), "app_user", host)
 
     create_engine.assert_not_called()
+
+
+def test_mysql_literal_percent_host_is_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = FakeConnection(MysqlDialect(), current_identity="root@%")
+    monkeypatch.setattr(mysql_user, "create_engine", lambda _: FakeEngine(connection))
+    monkeypatch.setenv("MYSQL_USER_PASSWORD", "test-password")
+
+    mysql_user.rotate_user_password(mysql_dsn(), "root", "%", "MYSQL_USER_PASSWORD")
+
+    assert connection.statements == [
+        "ALTER USER :user@:host IDENTIFIED BY :password",
+    ]
+    assert connection.parameters == [{"user": "root", "host": "%", "password": "test-password"}]
 
 
 def test_mysql_list_exposes_only_non_sensitive_fields(monkeypatch: pytest.MonkeyPatch) -> None:

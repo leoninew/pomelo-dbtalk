@@ -1,6 +1,6 @@
 name: CI
 
-# Replace the project default branch and minimum Python version.
+# Replace the project default branch and supported Python version (>=3.12).
 env:
   DEFAULT_BRANCH: &default_branch "develop"
   PYTHON_VERSION: "3.12"

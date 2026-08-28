@@ -163,22 +163,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     outcomes: list[Outcome] = []
     try:
+        target_config: PluginConfig | SkillConfig | None
         if args.asset == "plugin":
             if not config.plugins:
                 raise SyncError("project release configuration does not define plugin")
-            target_config: PluginConfig | SkillConfig = config.plugins[0]
+            target_config = config.plugins[0]
         else:
             target_config = config.skill
         if target_config is None:
             raise SyncError(f"project release configuration does not define {args.asset}")
-        if args.asset == "skill" and not SAFE_SKILL_NAME.fullmatch(target_config.name):
+        if isinstance(target_config, SkillConfig) and not SAFE_SKILL_NAME.fullmatch(
+            target_config.name
+        ):
             raise SyncError(
                 "standalone skill name can only contain letters, digits, underscores, and hyphens"
             )
         requested, explicit = requested_clients(args)
         targets, selection = select_targets(target_config, requested, explicit, args.strict)
         outcomes.extend(selection)
-        if args.asset == "plugin":
+        if isinstance(target_config, PluginConfig):
             exit_code = manage_plugin(
                 config.plugins, args.command, targets, args.dry_run, outcomes
             )
@@ -313,20 +316,20 @@ def manage_plugin(
                 )
         return 1 if any(outcome.status == "failed" for outcome in outcomes) else 0
 
-    plans_by_plugin: list[tuple[PluginConfig, Sequence[ClientPlan]]] = []
+    plans_by_plugin: list[tuple[PluginConfig, list[ClientPlan]]] = []
     for config in configs:
         runner = runners[config.plugin_name]
         if command == "remove":
-            plans = [plan_plugin_removal(config, target, runner) for target in targets]
+            client_plans = [plan_plugin_removal(config, target, runner) for target in targets]
         else:
             validate_plugin_sources(config, (target.name for target in targets))
-            plans = [plan_plugin(config, target, runner) for target in targets]
-        plans_by_plugin.append((config, plans))
+            client_plans = [plan_plugin(config, target, runner) for target in targets]
+        plans_by_plugin.append((config, client_plans))
 
     failed = False
     for target_index, target in enumerate(targets):
-        for config, plans in plans_by_plugin:
-            plan = plans[target_index]
+        for config, client_plans in plans_by_plugin:
+            plan = client_plans[target_index]
             if command == "check":
                 logging.info(
                     "client=%s plugin=%s action=%s",
@@ -530,6 +533,7 @@ def plan_codex(config: PluginConfig, target: ClientTarget, runner: CommandRunner
 def plan_grok(config: PluginConfig, target: ClientTarget, runner: CommandRunner) -> ClientPlan:
     installed = records(runner.inspect(target, ("plugin", "list", "--json")), "plugins")
     installed_plugin = exact_record(installed, "name", config.plugin_name)
+    commands: tuple[Command, ...]
     if installed_plugin is None:
         commands = (
             Command(

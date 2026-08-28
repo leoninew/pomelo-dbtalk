@@ -314,7 +314,6 @@ def rotate_user_password(parsed: ParsedDsn, user_name: str, host: str, password_
     password = _password_from_environment(password_env)
 
     def operation(connection: Connection) -> None:
-        _reject_current_account(connection, user_name, host)
         connection.execute(
             text("ALTER USER :user@:host IDENTIFIED BY :password"),
             {"user": user_name, "host": host, "password": password},
@@ -429,11 +428,15 @@ def _validate_account(user_name: str, host: str) -> None:
 def _validate_host(host: str) -> None:
     if not isinstance(host, str) or not host:
         raise DatabaseOperationError("MySQL user host is invalid")
-    if "%" in host or "_" in host or any(category(character).startswith("C") for character in host):
+    if (
+        ("%" in host and host != "%")
+        or "_" in host
+        or any(category(character).startswith("C") for character in host)
+    ):
         raise DatabaseOperationError(
             "MySQL user host must not contain wildcard or control characters"
         )
-    if host == "localhost":
+    if host in {"localhost", "%"}:
         return
     try:
         ip_address(host)

@@ -80,6 +80,6 @@ dbtalk mysql user --help
 dbtalk mysql grant --help
 ```
 
-user 管理和 grant/revoke 需要完整管理 DSN。密码只能通过 `--password-env NAME` 引用，不得作为 CLI 值或输出内容。MySQL user 必须提供精确的 `--user` 和 `--host`；仅支持 `localhost`、单个 DNS 名称、IPv4 或 IPv6，不允许 `%`、`_` 或其他通配 host。
+user 管理和 grant/revoke 需要完整管理 DSN。密码只能通过 `--password-env NAME` 引用，不得作为 CLI 值或输出内容。MySQL user 必须提供精确的 `--user` 和 `--host`；允许 `localhost`、单个 DNS 名称、IPv4、IPv6，以及字面量 `%` 账号 host。`%` 仅表示数据库中已存在的精确 `user@%` 账号，不得扩展为其他模式；仍不允许包含 `_` 或部分通配符的 host。
 
-grant/revoke 仅支持单个 `--database` 与 `read-only` / `read-write` profile。执行启用、禁用、轮换密码、删除、授权或撤销前，必须确认目标、资源、profile 和写入权限，并传入 `--yes`。不要修改当前管理 account，不要用这些命令传入原始 `GRANT`/`REVOKE` SQL，也不要扩大到全局、表级或任意 privilege。
+grant/revoke 仅支持单个 `--database` 与 `read-only` / `read-write` profile。执行启用、禁用、轮换密码、删除、授权或撤销前，必须确认目标、资源、profile 和写入权限，并传入 `--yes`。轮换密码可针对当前管理账号，但必须有用户明确授权；其他账号管理操作不得修改当前管理 account。不要用这些命令传入原始 `GRANT`/`REVOKE` SQL，也不要扩大到全局、表级或任意 privilege。

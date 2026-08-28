@@ -6,6 +6,7 @@ env:
   PACKAGE_IMPORT: "dbtalk"
   RELEASE_COMMAND: "dbtalk"
   TAG_PATTERN: &tag_pattern "v*"
+  # Set a concrete project-supported version; it must be 3.12 or newer.
   PYTHON_VERSION: "3.12"
 
 on:

@@ -1,6 +1,6 @@
 {
   "name": "dbtalk",
-  "version": "0.1.0+codex.20260823083639",
+  "version": "0.1.0+codex.20260828130743",
   "description": "MySQL and PostgreSQL management, backup, and JSONL data transfer workflows for dbtalk.",
   "author": {
     "name": "Local developer"
