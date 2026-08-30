@@ -682,6 +682,8 @@ def _decode_declared_value(
         _parse_date(_require_string(value, "DATE"))
     if family == "time":
         _parse_time(_require_string(value, "TIME"))
+    if family == "boolean":
+        return _decode_boolean(value)
     return value
 
 
@@ -693,6 +695,22 @@ def _decimal_tag(value: object) -> JSONValue:
     if not decimal_value.is_finite():
         raise DatabaseTransferError("DECIMAL column contains a non-finite value")
     return {"$type": "decimal", "value": format(decimal_value, "f")}
+
+
+def _decode_boolean(value: object) -> bool:
+    """Normalize portable JSON boolean representations for database binding."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"0", "false", "f", "no", "n"}:
+            return False
+        if normalized in {"1", "true", "t", "yes", "y"}:
+            return True
+    raise DatabaseTransferError("BOOLEAN column contains an invalid boolean value")
 
 
 def _validate_declared_row(

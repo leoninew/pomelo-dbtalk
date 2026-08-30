@@ -154,4 +154,5 @@ uv run dbtalk database import `
 BLOB 使用 base64 type tag，DECIMAL 使用 decimal type tag。无时区日期时间按 `--tz` 解释并规范化为
 UTC ISO 8601 字符串。MySQL 零日期可由 `database.zero_datetime_as_null` 默认转换为 JSON `null`；
 设为 `false` 时遇到零日期会失败。PostgreSQL 普通表、主键、外键、常见类型和 JSONL transfer 由
-SQLAlchemy Inspector 和对应 dialect 处理。
+SQLAlchemy Inspector 和对应 dialect 处理。导入到 `BOOLEAN` 列时，JSON 的 `true`/`false`、数值
+`0`/`1` 及常见布尔文本会规范化为目标驱动可绑定的 Boolean；其他值会在写入前失败。

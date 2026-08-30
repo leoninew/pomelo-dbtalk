@@ -660,6 +660,8 @@ class DatabaseTransferTests(unittest.TestCase):
             decode_value("2026-08-19T00:00:00Z", "DATETIME", ZoneInfo("Asia/Shanghai")),
             "2026-08-19 08:00:00",
         )
+        self.assertTrue(decode_value(1, "BOOLEAN", ZoneInfo("UTC")))
+        self.assertFalse(decode_value("false", "BOOLEAN", ZoneInfo("UTC")))
         self.assertEqual(
             encode_value(
                 "2026-08-19 08:00:00.123456789 +0800 CST",
@@ -681,6 +683,8 @@ class DatabaseTransferTests(unittest.TestCase):
             encode_value(float("nan"), "REAL", ZoneInfo("UTC"))
         with self.assertRaisesRegex(DatabaseTransferError, "datetime"):
             decode_value("2026-08-19", "DATETIME", ZoneInfo("UTC"))
+        with self.assertRaisesRegex(DatabaseTransferError, "BOOLEAN"):
+            decode_value(2, "BOOLEAN", ZoneInfo("UTC"))
 
     def test_mysql_time_duration_must_fit_a_portable_time_of_day(self) -> None:
         self.assertEqual(_mysql_time_of_day(timedelta(hours=8, minutes=9)), "08:09:00")

@@ -490,6 +490,16 @@ def test_sqlalchemy_transfer_covers_dialect_boundaries() -> None:
         options,
         parse_dsn("postgresql+psycopg://user:pass@host/app"),
     ) == (1,)
+    boolean_header = TableBlockHeader(
+        "projects", (ColumnDefinition("is_active", "TINYINT(1)"),), ("is_active",)
+    )
+    assert _target_values(
+        (1,),
+        boolean_header,
+        TableSchema("projects", (ColumnDefinition("is_active", "BOOLEAN"),), ("is_active",), ()),
+        options,
+        parse_dsn("postgresql+psycopg://user:pass@host/app"),
+    ) == (True,)
     _verify_database(
         cast(Any, postgres_connection),
         parse_dsn("postgresql+psycopg://user:pass@host/app"),
