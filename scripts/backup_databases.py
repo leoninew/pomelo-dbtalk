@@ -18,12 +18,12 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, cast
 
 import yaml
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from sqlalchemy.engine import make_url
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -58,22 +58,39 @@ class BackupError(RuntimeError):
     """Raised when the backup run cannot safely continue."""
 
 
+def positive_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sequentially dump the databases declared in a YAML configuration."
+        description="Back up databases or test configured database connections."
     )
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    backup_parser = subparsers.add_parser(
+        "backup",
+        help="Dump the databases declared in a YAML configuration.",
+        description="Sequentially dump the databases declared in a YAML configuration.",
+    )
+    backup_parser.add_argument(
         "--config",
         type=Path,
         default=DEFAULT_CONFIG_PATH,
         help="Backup YAML path (default: scripts/backup_databases.yaml).",
     )
-    parser.add_argument(
+    backup_parser.add_argument(
         "--dbtalk-command",
         default="dbtalk",
         help="dbtalk executable or path (default: dbtalk).",
     )
-    mode = parser.add_mutually_exclusive_group()
+    mode = backup_parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--dry-run",
         dest="dry_run",
@@ -86,7 +103,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Execute the configured dumps and write the backup manifest.",
     )
-    parser.set_defaults(dry_run=True)
+    backup_parser.set_defaults(dry_run=True)
+
+    test_parser = subparsers.add_parser(
+        "test",
+        help="Test all DBTALK_* DSNs declared in scripts/.env.",
+        description="Test all DBTALK_* DSNs declared in scripts/.env.",
+    )
+    test_parser.add_argument(
+        "--dbtalk-command",
+        default="dbtalk",
+        help="dbtalk executable or path (default: dbtalk).",
+    )
+    test_parser.add_argument(
+        "--timeout",
+        type=positive_integer,
+        default=10,
+        help="Maximum query time in seconds (default: 10).",
+    )
     return parser
 
 
@@ -165,6 +199,21 @@ def load_connection_environment() -> None:
     load_dotenv(dotenv_path=SCRIPT_DIR / ".env", override=False)
 
 
+def load_dsn_environment_names() -> tuple[str, ...]:
+    """Return DBTALK_* names declared in the .env file next to this script."""
+
+    dotenv_path = SCRIPT_DIR / ".env"
+    try:
+        values = dotenv_values(dotenv_path=dotenv_path)
+    except OSError as exc:
+        raise BackupError(f"could not read environment file: {dotenv_path}") from exc
+
+    names = sorted(name for name in values if name.startswith("DBTALK_"))
+    if not names:
+        raise BackupError(f"no DBTALK_* variables found in environment file: {dotenv_path}")
+    return tuple(names)
+
+
 def require_dsn_envs(targets: Sequence[BackupTarget]) -> None:
     missing = sorted({target.dsn_env for target in targets if not os.environ.get(target.dsn_env)})
     if missing:
@@ -201,9 +250,25 @@ def safe_component(value: str) -> str:
     return component.strip("-") or "unknown"
 
 
-def output_path(target: BackupTarget, output_directory: Path, batch_timestamp: str) -> Path:
+def display_path(path: Path) -> str:
+    """Render a path relative to the repository for concise logs and manifests."""
+
+    relative = os.path.relpath(path.resolve(), REPOSITORY_ROOT)
+    return Path(relative).as_posix()
+
+
+def batch_directory(output_directory: Path, batch_timestamp: str) -> Path:
+    candidate = output_directory / batch_timestamp
+    sequence = 1
+    while candidate.exists():
+        candidate = output_directory / f"{batch_timestamp}-{sequence:02d}"
+        sequence += 1
+    return candidate
+
+
+def output_path(target: BackupTarget, output_directory: Path) -> Path:
     extension = ".dump" if target.engine == "postgres" else ".sql.gz"
-    stem = "-".join((target.output_label, safe_component(target.database), batch_timestamp))
+    stem = "-".join((target.output_label, safe_component(target.database)))
     candidate = output_directory / f"{stem}{extension}"
     sequence = 1
     while candidate.exists():
@@ -212,12 +277,11 @@ def output_path(target: BackupTarget, output_directory: Path, batch_timestamp: s
     return candidate
 
 
-def manifest_path(output_directory: Path, batch_timestamp: str) -> Path:
-    stem = f"backup-manifest-{batch_timestamp}"
-    candidate = output_directory / f"{stem}.md"
+def manifest_path(output_directory: Path) -> Path:
+    candidate = output_directory / "backup-manifest.md"
     sequence = 1
     while candidate.exists():
-        candidate = output_directory / f"{stem}-{sequence:02d}.md"
+        candidate = output_directory / f"backup-manifest-{sequence:02d}.md"
         sequence += 1
     return candidate
 
@@ -229,17 +293,17 @@ def markdown_value(value: str) -> str:
 
 def write_manifest(
     config_path: Path,
-    backup_config: BackupConfig,
     artifacts: Sequence[BackupArtifact],
+    batch_directory: Path,
     batch_timestamp: str,
 ) -> Path:
-    destination = manifest_path(backup_config.output_directory, batch_timestamp)
+    destination = manifest_path(batch_directory)
     lines = [
         "# Database Backup Manifest",
         "",
-        f"- Generated at (UTC): `{batch_timestamp}`",
-        f"- Configuration: `{config_path}`",
-        f"- Output directory: `{backup_config.output_directory}`",
+        f"- Generated at (local): `{batch_timestamp}`",
+        f"- Configuration: `{display_path(config_path)}`",
+        f"- Output directory: `{display_path(batch_directory)}`",
         f"- Backups: `{len(artifacts)}`",
         "",
         "DSN values are intentionally omitted. Each backup used the DSN from "
@@ -251,9 +315,7 @@ def write_manifest(
         format_name = (
             "PostgreSQL custom archive" if target.engine == "postgres" else "MySQL SQL dump (gzip)"
         )
-        relative_output = artifact.destination.relative_to(
-            backup_config.output_directory
-        ).as_posix()
+        relative_output = artifact.destination.relative_to(batch_directory).as_posix()
         lines.extend(
             [
                 f"## {index}. {markdown_value(target.database)}",
@@ -309,16 +371,43 @@ def run_dump(dbtalk: str, target: BackupTarget, destination: Path) -> None:
         raise BackupError(f"dbtalk dump produced no usable file: {destination}")
 
 
+def run_dsn_test(dbtalk: str, dsn_env: str, timeout_seconds: int) -> bool:
+    command = [
+        dbtalk,
+        "database",
+        "query",
+        "--dsn-env",
+        dsn_env,
+        "--sql",
+        "SELECT 1",
+        "--timeout",
+        str(timeout_seconds),
+        "--format",
+        "json",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=REPOSITORY_ROOT,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def run_backups(args: argparse.Namespace) -> int:
     backup_config = load_backup_config(args.config)
-    batch_timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    batch_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    batch_output_directory = batch_directory(backup_config.output_directory, batch_timestamp)
     total = len(backup_config.targets)
 
     logging.info(
-        "backup run started targets=%d config=%s output_dir=%s timestamp=%s",
+        "backup run started targets=%d config=%s output_dir=%s batch_dir=%s timestamp=%s",
         total,
         args.config.expanduser().resolve(),
         backup_config.output_directory,
+        batch_output_directory,
         batch_timestamp,
     )
 
@@ -327,11 +416,11 @@ def run_backups(args: argparse.Namespace) -> int:
         load_connection_environment()
         require_dsn_envs(backup_config.targets)
         dbtalk = resolve_command(args.dbtalk_command)
-        backup_config.output_directory.mkdir(parents=True, exist_ok=True)
+        batch_output_directory.mkdir(parents=True, exist_ok=True)
 
     artifacts: list[BackupArtifact] = []
     for index, target in enumerate(backup_config.targets, 1):
-        destination = output_path(target, backup_config.output_directory, batch_timestamp)
+        destination = output_path(target, batch_output_directory)
         logging.info(
             "backup planned index=%d/%d engine=%s connection=%s database=%s output=%s",
             index,
@@ -339,7 +428,7 @@ def run_backups(args: argparse.Namespace) -> int:
             target.engine,
             target.connection,
             target.database,
-            destination,
+            display_path(destination),
         )
         if args.dry_run:
             continue
@@ -376,13 +465,49 @@ def run_backups(args: argparse.Namespace) -> int:
     else:
         manifest = write_manifest(
             args.config.expanduser().resolve(),
-            backup_config,
             artifacts,
+            batch_output_directory,
             batch_timestamp,
         )
         logging.info("backup manifest written path=%s", manifest)
         logging.info("backup run completed targets=%d", total)
     return 0
+
+
+def run_tests(args: argparse.Namespace) -> int:
+    dsn_envs = load_dsn_environment_names()
+    load_connection_environment()
+    dbtalk = resolve_command(args.dbtalk_command)
+
+    total = len(dsn_envs)
+    passed = 0
+    logging.info("dsn test run started variables=%d timeout_seconds=%d", total, args.timeout)
+    for index, dsn_env in enumerate(dsn_envs, 1):
+        logging.info("dsn test started index=%d/%d variable=%s", index, total, dsn_env)
+        started_at = time.perf_counter()
+        succeeded = run_dsn_test(dbtalk, dsn_env, args.timeout)
+        duration_seconds = time.perf_counter() - started_at
+        if succeeded:
+            passed += 1
+            logging.info(
+                "dsn test passed index=%d/%d variable=%s duration_seconds=%.3f",
+                index,
+                total,
+                dsn_env,
+                duration_seconds,
+            )
+        else:
+            logging.error(
+                "dsn test failed index=%d/%d variable=%s duration_seconds=%.3f",
+                index,
+                total,
+                dsn_env,
+                duration_seconds,
+            )
+
+    failed = total - passed
+    logging.info("dsn test run completed variables=%d passed=%d failed=%d", total, passed, failed)
+    return 0 if failed == 0 else 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -393,9 +518,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = build_parser().parse_args(argv)
     try:
-        return run_backups(args)
+        if args.command == "backup":
+            return run_backups(args)
+        if args.command == "test":
+            return run_tests(args)
+        raise BackupError(f"unsupported command: {args.command}")
     except BackupError:
-        logging.exception("backup run failed")
+        logging.exception("%s run failed", args.command)
         return 1
 
 

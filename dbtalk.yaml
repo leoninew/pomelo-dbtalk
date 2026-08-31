@@ -26,4 +26,4 @@ database:
 
 postgres:
   output_directory: data
-  client_image: postgres:18
+  client_image: postgres:18-alpine
