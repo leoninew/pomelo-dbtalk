@@ -23,7 +23,14 @@ def test_parser_places_existing_options_under_backup() -> None:
     backup_args = backup_databases.build_parser().parse_args(["backup"])
     assert backup_args.command == "backup"
     assert backup_args.dry_run is True
+    assert backup_args.continue_on_error is False
     assert backup_args.config == backup_databases.DEFAULT_CONFIG_PATH
+
+    continue_args = backup_databases.build_parser().parse_args(["backup", "--continue-on-error"])
+    assert continue_args.continue_on_error is True
+
+    resume_args = backup_databases.build_parser().parse_args(["backup", "--resume", "existing"])
+    assert resume_args.resume == Path("existing")
 
     test_args = backup_databases.build_parser().parse_args(["test", "--timeout", "7"])
     assert test_args.command == "test"
@@ -187,9 +194,9 @@ def test_manifest_is_written_inside_batch_directory_with_relative_output(tmp_pat
     content = manifest.read_text(encoding="utf-8")
     assert "## 1. `think_mysql`" in content
     assert "`mysql` at `10.0.0.1:3306`" in content
-    assert "| Database | Backup file | Format | Size |" in content
-    assert "| `app` | `mysql-remote-10.0.0.1-3306-app.sql.gz` |" in content
-    assert "| `audit` | `mysql-remote-10.0.0.1-3306-audit.sql.gz` |" in content
+    assert "| Database | Status | Backup file | Format | Size | Error |" in content
+    assert "| `app` | Succeeded | `mysql-remote-10.0.0.1-3306-app.sql.gz` |" in content
+    assert "| `audit` | Succeeded | `mysql-remote-10.0.0.1-3306-audit.sql.gz` |" in content
     assert content.count("## 1. `think_mysql`") == 1
 
 
@@ -258,7 +265,155 @@ def test_run_dump_logs_the_dbtalk_command(
         str(destination),
         "--archive",
     ]
-    assert f"dbtalk command={shlex.join(run.call_args.args[0])}" in caplog.text
+    logged_command = run.call_args.args[0].copy()
+    logged_command[logged_command.index("--output") + 1] = destination.name
+    assert f"dbtalk command={shlex.join(logged_command)}" in caplog.text
+    assert str(destination) not in caplog.text
+
+
+def test_run_backups_continues_after_individual_errors_when_requested(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config_path = tmp_path / "backup_databases.yaml"
+    config_path.write_text(
+        "output_directory: backups\n"
+        "connections:\n"
+        "  local:\n"
+        "    engine: mysql\n"
+        "    address: localhost:3306\n"
+        "    databases:\n"
+        "      - name: first\n"
+        "        dsn: 'mysql+pymysql://user:password@host:3306/first'\n"
+        "        enabled: true\n"
+        "      - name: invalid\n"
+        "        dsn: 'not a DSN'\n"
+        "        enabled: true\n"
+        "      - name: broken\n"
+        "        dsn: 'mysql+pymysql://user:password@host:3306/broken'\n"
+        "        enabled: true\n"
+        "      - name: last\n"
+        "        dsn: 'mysql+pymysql://user:password@host:3306/last'\n"
+        "        enabled: true\n",
+        encoding="utf-8",
+    )
+    args = Namespace(
+        config=config_path,
+        dbtalk_command="dbtalk",
+        dry_run=False,
+        continue_on_error=True,
+    )
+    dumped_databases: list[str] = []
+
+    def dump(
+        _dbtalk: str,
+        target: backup_databases.BackupTarget,
+        destination: Path,
+    ) -> None:
+        dumped_databases.append(target.database)
+        if target.database == "broken":
+            raise backup_databases.BackupError("simulated dump failure")
+        destination.write_bytes(b"backup")
+
+    with (
+        patch.object(backup_databases, "resolve_command", return_value="dbtalk"),
+        patch.object(backup_databases, "run_dump", side_effect=dump),
+        caplog.at_level(logging.INFO),
+    ):
+        assert backup_databases.run_backups(args) == 1
+
+    assert dumped_databases == ["first", "broken", "last"]
+    assert "backup failed index=2/4 engine=mysql connection=local database=invalid" in caplog.text
+    assert "backup failed index=3/4 engine=mysql connection=local database=broken" in caplog.text
+    assert "backup run completed targets=4 succeeded=2 failed=2" in caplog.text
+    manifest = next((tmp_path / "backups").glob("*/backup-manifest.md"))
+    manifest_content = manifest.read_text(encoding="utf-8")
+    assert "- Successful backups: `2`" in manifest_content
+    assert "- Failed backups: `2`" in manifest_content
+    assert "## 1. `local`" in manifest_content
+    assert "## Failed Backups" not in manifest_content
+    invalid_failure = (
+        "| `invalid` | Failed | - | MySQL SQL dump (gzip) | - | "
+        "`invalid DSN for local.invalid` |"
+    )
+    broken_failure = (
+        "| `broken` | Failed | - | MySQL SQL dump (gzip) | - | "
+        "`simulated dump failure` |"
+    )
+    assert invalid_failure in manifest_content
+    assert broken_failure in manifest_content
+    first_success = "| `first` | Succeeded |"
+    last_success = "| `last` | Succeeded |"
+    assert manifest_content.index(first_success) < manifest_content.index(invalid_failure)
+    assert manifest_content.index(invalid_failure) < manifest_content.index(broken_failure)
+    assert manifest_content.index(broken_failure) < manifest_content.index(last_success)
+    planned_outputs = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("backup planned")
+    ]
+    assert all("output=mysql-local-localhost-3306-" in message for message in planned_outputs)
+    assert all(str(tmp_path) not in message for message in planned_outputs)
+
+
+def test_run_backups_resume_reuses_successful_backups_and_retries_missing_ones(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config_path = tmp_path / "backup_databases.yaml"
+    config_path.write_text(
+        "output_directory: backups\n"
+        "connections:\n"
+        "  local:\n"
+        "    engine: mysql\n"
+        "    address: localhost:3306\n"
+        "    databases:\n"
+        "      - name: existing\n"
+        "        dsn: 'mysql+pymysql://user:password@host:3306/existing'\n"
+        "        enabled: true\n"
+        "      - name: retry\n"
+        "        dsn: 'mysql+pymysql://user:password@host:3306/retry'\n"
+        "        enabled: true\n",
+        encoding="utf-8",
+    )
+    resume_directory = tmp_path / "existing-batch"
+    resume_directory.mkdir()
+    targets = backup_databases.load_backup_config(config_path).targets
+    reused_destination = resume_directory / backup_databases.output_filename(targets[0])
+    reused_destination.write_bytes(b"existing backup")
+    previous_manifest = resume_directory / "backup-manifest.md"
+    previous_manifest.write_text("old manifest", encoding="utf-8")
+    args = Namespace(
+        config=config_path,
+        dbtalk_command="dbtalk",
+        dry_run=False,
+        continue_on_error=False,
+        resume=resume_directory,
+    )
+    dumped_databases: list[str] = []
+
+    def dump(
+        _dbtalk: str,
+        target: backup_databases.BackupTarget,
+        destination: Path,
+    ) -> None:
+        dumped_databases.append(target.database)
+        destination.write_bytes(b"retried backup")
+
+    with (
+        patch.object(backup_databases, "resolve_command", return_value="dbtalk"),
+        patch.object(backup_databases, "run_dump", side_effect=dump),
+        caplog.at_level(logging.INFO),
+    ):
+        assert backup_databases.run_backups(args) == 0
+
+    assert dumped_databases == ["retry"]
+    assert "backup reused index=1/2 engine=mysql database=existing" in caplog.text
+    assert previous_manifest.read_text(encoding="utf-8") != "old manifest"
+    assert not (resume_directory / "backup-manifest-01.md").exists()
+    manifest_content = previous_manifest.read_text(encoding="utf-8")
+    assert "| `existing` | Reused |" in manifest_content
+    assert "| `retry` | Succeeded |" in manifest_content
 
 
 def test_run_tests_reports_each_result_and_returns_failure(

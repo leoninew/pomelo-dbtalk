@@ -49,6 +49,13 @@ class BackupArtifact:
     target: BackupTarget
     destination: Path
     size_bytes: int
+    status: Literal["Succeeded", "Reused"] = "Succeeded"
+
+
+@dataclass(frozen=True)
+class BackupFailure:
+    target: BackupTarget
+    reason: str
 
 
 class BackupError(RuntimeError):
@@ -101,6 +108,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Execute the configured dumps and write the backup manifest.",
     )
     backup_parser.set_defaults(dry_run=True)
+    backup_parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue remaining backups after an individual backup fails.",
+    )
+    backup_parser.add_argument(
+        "--resume",
+        type=Path,
+        metavar="DIRECTORY",
+        help="Reuse non-empty backups from an existing batch directory.",
+    )
 
     test_parser = subparsers.add_parser(
         "test",
@@ -261,7 +279,11 @@ def safe_component(value: str) -> str:
 def display_path(path: Path) -> str:
     """Render a path relative to the repository for concise logs and manifests."""
 
-    relative = os.path.relpath(path.resolve(), REPOSITORY_ROOT)
+    resolved_path = path.resolve()
+    try:
+        relative = os.path.relpath(resolved_path, REPOSITORY_ROOT)
+    except ValueError:
+        return resolved_path.as_posix()
     return Path(relative).as_posix()
 
 
@@ -274,15 +296,29 @@ def batch_directory(output_directory: Path, batch_timestamp: str) -> Path:
     return candidate
 
 
+def output_filename(target: BackupTarget) -> str:
+    extension = ".dump" if target.engine == "postgres" else ".sql.gz"
+    stem = "-".join((target.output_label, safe_component(target.database)))
+    return f"{stem}{extension}"
+
+
 def output_path(target: BackupTarget, output_directory: Path) -> Path:
     extension = ".dump" if target.engine == "postgres" else ".sql.gz"
     stem = "-".join((target.output_label, safe_component(target.database)))
-    candidate = output_directory / f"{stem}{extension}"
+    filename = output_filename(target)
+    candidate = output_directory / filename
     sequence = 1
     while candidate.exists():
         candidate = output_directory / f"{stem}-{sequence:02d}{extension}"
         sequence += 1
     return candidate
+
+
+def reusable_backup_path(target: BackupTarget, output_directory: Path) -> Path | None:
+    candidate = output_directory / output_filename(target)
+    if candidate.is_file() and candidate.stat().st_size > 0:
+        return candidate
+    return None
 
 
 def manifest_path(output_directory: Path) -> Path:
@@ -301,30 +337,37 @@ def markdown_value(value: str) -> str:
 
 def write_manifest(
     config_path: Path,
-    artifacts: Sequence[BackupArtifact],
+    results: Sequence[BackupArtifact | BackupFailure],
     batch_directory: Path,
     batch_timestamp: str,
+    *,
+    replace_existing: bool = False,
 ) -> Path:
-    destination = manifest_path(batch_directory)
+    destination = batch_directory / "backup-manifest.md"
+    if not replace_existing:
+        destination = manifest_path(batch_directory)
+    successful_backups = sum(isinstance(result, BackupArtifact) for result in results)
+    failed_backups = len(results) - successful_backups
     lines = [
         "# Database Backup Manifest",
         "",
         f"- Generated at (local): `{batch_timestamp}`",
         f"- Configuration: `{display_path(config_path)}`",
         f"- Output directory: `{display_path(batch_directory)}`",
-        f"- Backups: `{len(artifacts)}`",
+        f"- Successful backups: `{successful_backups}`",
+        f"- Failed backups: `{failed_backups}`",
         "",
         "DSN values are intentionally omitted from this manifest.",
         "",
     ]
-    grouped_artifacts: dict[str, list[BackupArtifact]] = {}
-    for artifact in artifacts:
-        grouped_artifacts.setdefault(artifact.target.connection_name, []).append(artifact)
+    grouped_results: dict[str, list[BackupArtifact | BackupFailure]] = {}
+    for result in results:
+        grouped_results.setdefault(result.target.connection_name, []).append(result)
 
-    for connection_index, (connection_name, connection_artifacts) in enumerate(
-        grouped_artifacts.items(), 1
+    for connection_index, (connection_name, connection_results) in enumerate(
+        grouped_results.items(), 1
     ):
-        connection_target = connection_artifacts[0].target
+        connection_target = connection_results[0].target
         lines.extend(
             [
                 f"## {connection_index}. {markdown_value(connection_name)}",
@@ -332,25 +375,29 @@ def write_manifest(
                 f"{markdown_value(connection_target.engine)} at "
                 f"{markdown_value(connection_target.connection)}",
                 "",
-                "| Database | Backup file | Format | Size |",
-                "| --- | --- | --- | ---: |",
+                "| Database | Status | Backup file | Format | Size | Error |",
+                "| --- | --- | --- | --- | ---: | --- |",
             ]
         )
-        for artifact in connection_artifacts:
-            target = artifact.target
+        for result in connection_results:
+            target = result.target
             format_name = (
                 "PostgreSQL custom archive"
                 if target.engine == "postgres"
                 else "MySQL SQL dump (gzip)"
             )
-            relative_output = artifact.destination.relative_to(batch_directory).as_posix()
-            lines.extend(
-                [
+            if isinstance(result, BackupArtifact):
+                relative_output = result.destination.relative_to(batch_directory).as_posix()
+                lines.append(
                     f"| {markdown_value(target.database)} | "
-                    f"{markdown_value(relative_output)} | {format_name} | "
-                    f"{artifact.size_bytes:,} bytes |",
-                ]
-            )
+                    f"{result.status} | {markdown_value(relative_output)} | {format_name} | "
+                    f"{result.size_bytes:,} bytes | - |"
+                )
+            else:
+                lines.append(
+                    f"| {markdown_value(target.database)} | Failed | - | {format_name} | - | "
+                    f"{markdown_value(result.reason)} |"
+                )
         lines.append("")
 
     try:
@@ -379,7 +426,9 @@ def run_dump(
     if target.engine == "mysql":
         command.append("--archive")
 
-    logging.info("dbtalk command=%s", shlex.join(command))
+    log_command = command.copy()
+    log_command[log_command.index("--output") + 1] = destination.name
+    logging.info("dbtalk command=%s", shlex.join(log_command))
     child_environment = dict(environment) if environment is not None else os.environ.copy()
     child_environment[dsn_env] = target.dsn
     result = subprocess.run(
@@ -397,7 +446,7 @@ def run_dump(
             f"database={target.database} exit_code={result.returncode}"
         )
     if not destination.is_file() or destination.stat().st_size <= 0:
-        raise BackupError(f"dbtalk dump produced no usable file: {destination}")
+        raise BackupError(f"dbtalk dump produced no usable file: {destination.name}")
 
 
 def run_dsn_test(
@@ -437,7 +486,15 @@ def run_dsn_test(
 def run_backups(args: argparse.Namespace) -> int:
     backup_config = load_backup_config(args.config)
     batch_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    batch_output_directory = batch_directory(backup_config.output_directory, batch_timestamp)
+    resume_directory = getattr(args, "resume", None)
+    if resume_directory is not None:
+        if args.dry_run:
+            raise BackupError("--resume requires --no-dry-run")
+        batch_output_directory = resume_directory.expanduser().resolve()
+        if not batch_output_directory.is_dir():
+            raise BackupError(f"resume directory does not exist: {batch_output_directory}")
+    else:
+        batch_output_directory = batch_directory(backup_config.output_directory, batch_timestamp)
     total = len(backup_config.targets)
 
     logging.info(
@@ -452,13 +509,27 @@ def run_backups(args: argparse.Namespace) -> int:
     dbtalk = None
     enabled_targets = tuple(target for target in backup_config.targets if target.enabled)
     if not args.dry_run:
-        require_dsns(enabled_targets)
+        if not args.continue_on_error:
+            require_dsns(enabled_targets)
         dbtalk = resolve_command(args.dbtalk_command)
         batch_output_directory.mkdir(parents=True, exist_ok=True)
 
-    artifacts: list[BackupArtifact] = []
+    results: list[BackupArtifact | BackupFailure] = []
     for index, target in enumerate(backup_config.targets, 1):
-        destination = output_path(target, batch_output_directory)
+        reusable_backup = (
+            reusable_backup_path(target, batch_output_directory)
+            if resume_directory is not None
+            else None
+        )
+        destination = (
+            reusable_backup
+            if reusable_backup is not None
+            else (
+                batch_output_directory / output_filename(target)
+                if resume_directory is not None
+                else output_path(target, batch_output_directory)
+            )
+        )
         logging.info(
             "backup planned index=%d/%d engine=%s connection=%s database=%s output=%s",
             index,
@@ -466,7 +537,7 @@ def run_backups(args: argparse.Namespace) -> int:
             target.engine,
             target.connection,
             target.database,
-            display_path(destination),
+            destination.name,
         )
         if not target.enabled:
             logging.info(
@@ -481,6 +552,25 @@ def run_backups(args: argparse.Namespace) -> int:
         if args.dry_run:
             continue
 
+        if reusable_backup is not None:
+            artifact = BackupArtifact(
+                target=target,
+                destination=reusable_backup,
+                size_bytes=reusable_backup.stat().st_size,
+                status="Reused",
+            )
+            results.append(artifact)
+            logging.info(
+                "backup reused index=%d/%d engine=%s database=%s bytes=%d output=%s",
+                index,
+                total,
+                target.engine,
+                target.database,
+                artifact.size_bytes,
+                artifact.destination.name,
+            )
+            continue
+
         logging.info(
             "backup started index=%d/%d engine=%s database=%s",
             index,
@@ -489,15 +579,32 @@ def run_backups(args: argparse.Namespace) -> int:
             target.database,
         )
         assert dbtalk is not None
-        started_at = time.perf_counter()
-        run_dump(dbtalk, target, destination)
-        duration_seconds = time.perf_counter() - started_at
+        try:
+            if args.continue_on_error:
+                require_dsns((target,))
+            started_at = time.perf_counter()
+            run_dump(dbtalk, target, destination)
+            duration_seconds = time.perf_counter() - started_at
+        except (BackupError, OSError) as exc:
+            if not args.continue_on_error:
+                raise
+            results.append(BackupFailure(target=target, reason=str(exc)))
+            logging.error(
+                "backup failed index=%d/%d engine=%s connection=%s database=%s error=%s",
+                index,
+                total,
+                target.engine,
+                target.connection_name,
+                target.database,
+                exc,
+            )
+            continue
         artifact = BackupArtifact(
             target=target,
             destination=destination,
             size_bytes=destination.stat().st_size,
         )
-        artifacts.append(artifact)
+        results.append(artifact)
         logging.info(
             "backup completed index=%d/%d engine=%s database=%s bytes=%d duration_seconds=%.3f",
             index,
@@ -513,13 +620,21 @@ def run_backups(args: argparse.Namespace) -> int:
     else:
         manifest = write_manifest(
             args.config.expanduser().resolve(),
-            artifacts,
+            results,
             batch_output_directory,
             batch_timestamp,
+            replace_existing=resume_directory is not None,
         )
+        successful_backups = sum(isinstance(result, BackupArtifact) for result in results)
+        failed_backups = len(results) - successful_backups
         logging.info("backup manifest written path=%s", manifest)
-        logging.info("backup run completed targets=%d", total)
-    return 0
+        logging.info(
+            "backup run completed targets=%d succeeded=%d failed=%d",
+            total,
+            successful_backups,
+            failed_backups,
+        )
+    return 0 if not any(isinstance(result, BackupFailure) for result in results) else 1
 
 
 def run_tests(args: argparse.Namespace) -> int:
