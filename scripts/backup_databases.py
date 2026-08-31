@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Sequentially dump the databases declared in backup_databases.yaml.
-
-The YAML file contains connection metadata, database names, and the names of
-environment variables holding complete DSNs. DSN values are loaded from the
-process environment or from the .env file next to this script; process
-environment values take precedence.
-"""
+"""Sequentially dump databases declared in a Dynaconf YAML configuration."""
 
 from __future__ import annotations
 
@@ -23,13 +17,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, cast
 
-import yaml
-from dotenv import dotenv_values, load_dotenv
+from dynaconf import Dynaconf
 from sqlalchemy.engine import make_url
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SCRIPT_DIR.parent
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "backup_databases.yaml"
+ENV_PREFIX = "DBTALK"
 Engine = Literal["mysql", "postgres"]
 
 
@@ -47,6 +41,7 @@ class BackupTarget:
 class BackupConfig:
     output_directory: Path
     targets: tuple[BackupTarget, ...]
+    dsn_values: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -109,8 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     test_parser = subparsers.add_parser(
         "test",
-        help="Test all DBTALK_* DSNs declared in scripts/.env.",
-        description="Test all DBTALK_* DSNs declared in scripts/.env.",
+        help="Test all DSNs declared in the selected backup configuration.",
+        description="Test all DSNs declared in the selected backup configuration.",
+    )
+    test_parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help="Backup YAML path (default: scripts/backup_databases.yaml).",
     )
     test_parser.add_argument(
         "--dbtalk-command",
@@ -148,14 +149,21 @@ def _parse_engine(values: Mapping[str, object], context: str) -> Engine:
 
 def load_backup_config(config_path: Path) -> BackupConfig:
     config_path = config_path.expanduser().resolve()
-    try:
-        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise BackupError(f"could not read backup config: {config_path}") from exc
-    except yaml.YAMLError as exc:
-        raise BackupError(f"could not parse backup config: {config_path}") from exc
+    if not config_path.is_file():
+        raise BackupError(f"could not read backup config: {config_path}")
 
-    config = _mapping(raw_config, "config")
+    try:
+        dynaconf = Dynaconf(
+            settings_files=[str(config_path)],
+            envvar_prefix=ENV_PREFIX,
+            environments=False,
+        )
+        config = {
+            str(key).lower(): value for key, value in _mapping(dynaconf.to_dict(), "config").items()
+        }
+    except (OSError, ValueError, TypeError) as exc:
+        raise BackupError(f"could not load backup config: {config_path}") from exc
+
     output_value = _required_string(config, "output_directory", "config")
     output_directory = Path(output_value)
     if not output_directory.is_absolute():
@@ -193,37 +201,42 @@ def load_backup_config(config_path: Path) -> BackupConfig:
 
     if not targets:
         raise BackupError("backup config contains no databases")
-    return BackupConfig(output_directory=output_directory.resolve(), targets=tuple(targets))
+
+    raw_dsn_values = _mapping(config.get("dsn_values", {}), "config.dsn_values")
+    dsn_values: dict[str, str] = {}
+    for name, value in raw_dsn_values.items():
+        if not name.startswith("DBTALK_"):
+            raise BackupError(f"config.dsn_values.{name} must start with DBTALK_")
+        if not isinstance(value, str) or not value.strip():
+            raise BackupError(f"config.dsn_values.{name} must be a non-empty string")
+        dsn_values[name] = value.strip()
+
+    return BackupConfig(
+        output_directory=output_directory.resolve(),
+        targets=tuple(targets),
+        dsn_values=dsn_values,
+    )
 
 
-def load_connection_environment() -> None:
-    """Load only the .env file located next to this script."""
+def runtime_environment(dsn_values: Mapping[str, str]) -> dict[str, str]:
+    """Build the child environment, preserving process values over YAML values."""
 
-    load_dotenv(dotenv_path=SCRIPT_DIR / ".env", override=False)
-
-
-def load_dsn_environment_names() -> tuple[str, ...]:
-    """Return DBTALK_* names declared in the .env file next to this script."""
-
-    dotenv_path = SCRIPT_DIR / ".env"
-    try:
-        values = dotenv_values(dotenv_path=dotenv_path)
-    except OSError as exc:
-        raise BackupError(f"could not read environment file: {dotenv_path}") from exc
-
-    names = sorted(name for name in values if name.startswith("DBTALK_"))
-    if not names:
-        raise BackupError(f"no DBTALK_* variables found in environment file: {dotenv_path}")
-    return tuple(names)
+    environment = os.environ.copy()
+    for name, value in dsn_values.items():
+        environment.setdefault(name, value)
+    return environment
 
 
-def require_dsn_envs(targets: Sequence[BackupTarget]) -> None:
-    missing = sorted({target.dsn_env for target in targets if not os.environ.get(target.dsn_env)})
+def require_dsn_envs(
+    targets: Sequence[BackupTarget], environment: Mapping[str, str] | None = None
+) -> None:
+    values = os.environ if environment is None else environment
+    missing = sorted({target.dsn_env for target in targets if not values.get(target.dsn_env)})
     if missing:
         raise BackupError("missing DSN environment variables: " + ", ".join(missing))
 
     for target in targets:
-        dsn = os.environ[target.dsn_env]
+        dsn = values[target.dsn_env]
         try:
             dsn_database = make_url(dsn).database
         except Exception as exc:
@@ -361,7 +374,12 @@ def write_manifest(
     return destination
 
 
-def run_dump(dbtalk: str, target: BackupTarget, destination: Path) -> None:
+def run_dump(
+    dbtalk: str,
+    target: BackupTarget,
+    destination: Path,
+    environment: Mapping[str, str] | None = None,
+) -> None:
     command = [
         dbtalk,
         target.engine,
@@ -378,7 +396,7 @@ def run_dump(dbtalk: str, target: BackupTarget, destination: Path) -> None:
     result = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,
-        env=os.environ.copy(),
+        env=dict(environment) if environment is not None else os.environ.copy(),
         capture_output=True,
         text=True,
         check=False,
@@ -393,7 +411,12 @@ def run_dump(dbtalk: str, target: BackupTarget, destination: Path) -> None:
         raise BackupError(f"dbtalk dump produced no usable file: {destination}")
 
 
-def run_dsn_test(dbtalk: str, dsn_env: str, timeout_seconds: int) -> bool:
+def run_dsn_test(
+    dbtalk: str,
+    dsn_env: str,
+    timeout_seconds: int,
+    environment: Mapping[str, str] | None = None,
+) -> bool:
     command = [
         dbtalk,
         "database",
@@ -411,7 +434,7 @@ def run_dsn_test(dbtalk: str, dsn_env: str, timeout_seconds: int) -> bool:
     result = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,
-        env=os.environ.copy(),
+        env=dict(environment) if environment is not None else os.environ.copy(),
         capture_output=True,
         text=True,
         check=False,
@@ -435,9 +458,9 @@ def run_backups(args: argparse.Namespace) -> int:
     )
 
     dbtalk = None
+    environment = runtime_environment(backup_config.dsn_values)
     if not args.dry_run:
-        load_connection_environment()
-        require_dsn_envs(backup_config.targets)
+        require_dsn_envs(backup_config.targets, environment)
         dbtalk = resolve_command(args.dbtalk_command)
         batch_output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -465,7 +488,7 @@ def run_backups(args: argparse.Namespace) -> int:
         )
         assert dbtalk is not None
         started_at = time.perf_counter()
-        run_dump(dbtalk, target, destination)
+        run_dump(dbtalk, target, destination, environment)
         duration_seconds = time.perf_counter() - started_at
         artifact = BackupArtifact(
             target=target,
@@ -498,8 +521,15 @@ def run_backups(args: argparse.Namespace) -> int:
 
 
 def run_tests(args: argparse.Namespace) -> int:
-    dsn_envs = load_dsn_environment_names()
-    load_connection_environment()
+    backup_config = load_backup_config(args.config)
+    environment = runtime_environment(backup_config.dsn_values)
+    dsn_envs = tuple(
+        sorted(
+            set(backup_config.dsn_values)
+            | {target.dsn_env for target in backup_config.targets}
+        )
+    )
+    require_dsn_envs(backup_config.targets, environment)
     dbtalk = resolve_command(args.dbtalk_command)
 
     total = len(dsn_envs)
@@ -508,7 +538,7 @@ def run_tests(args: argparse.Namespace) -> int:
     for index, dsn_env in enumerate(dsn_envs, 1):
         logging.info("dsn test started index=%d/%d variable=%s", index, total, dsn_env)
         started_at = time.perf_counter()
-        succeeded = run_dsn_test(dbtalk, dsn_env, args.timeout)
+        succeeded = run_dsn_test(dbtalk, dsn_env, args.timeout, environment)
         duration_seconds = time.perf_counter() - started_at
         if succeeded:
             passed += 1

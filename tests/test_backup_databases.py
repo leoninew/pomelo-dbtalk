@@ -30,21 +30,50 @@ def test_parser_places_existing_options_under_backup() -> None:
     assert test_args.timeout == 7
 
 
-def test_load_dsn_environment_names_reads_only_db_talk_variables(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    (tmp_path / ".env").write_text(
-        "DBTALK_Z_DSN=mysql+pymysql://user:password@host/z\n"
-        "APP_DSN=sqlite:///:memory:\n"
-        "DBTALK_A_DSN=postgresql+psycopg://user:password@host/a\n",
+def test_load_backup_config_reads_dsn_values_from_dynaconf_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "backup_databases.yaml"
+    config_path.write_text(
+        "output_directory: ../data\n"
+        "dsn_values:\n"
+        "  DBTALK_APP_DSN: 'sqlite:///app.db'\n"
+        "connections:\n"
+        "  local:\n"
+        "    engine: mysql\n"
+        "    address: localhost:3306\n"
+        "    databases:\n"
+        "      - name: app\n"
+        "        dsn_env: DBTALK_APP_DSN\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(backup_databases, "SCRIPT_DIR", tmp_path)
 
-    assert backup_databases.load_dsn_environment_names() == (
-        "DBTALK_A_DSN",
-        "DBTALK_Z_DSN",
+    config = backup_databases.load_backup_config(config_path)
+
+    assert config.dsn_values == {"DBTALK_APP_DSN": "sqlite:///app.db"}
+    assert config.targets[0].database == "app"
+
+
+def test_load_backup_config_uses_process_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "backup_databases.yaml"
+    config_path.write_text(
+        "output_directory: ../data\n"
+        "dsn_values:\n"
+        "  DBTALK_APP_DSN: 'sqlite:///yaml'\n"
+        "connections:\n"
+        "  local:\n"
+        "    engine: mysql\n"
+        "    address: localhost:3306\n"
+        "    databases:\n"
+        "      - name: app\n"
+        "        dsn_env: DBTALK_APP_DSN\n",
+        encoding="utf-8",
     )
+    monkeypatch.setenv("DBTALK_DSN_VALUES__DBTALK_APP_DSN", "sqlite:///env")
+
+    config = backup_databases.load_backup_config(config_path)
+
+    assert config.dsn_values["DBTALK_APP_DSN"] == "sqlite:///env"
 
 
 def test_batch_directory_uses_timestamp_and_avoids_existing_directory(tmp_path: Path) -> None:
@@ -192,16 +221,28 @@ def test_run_dump_logs_the_dbtalk_command(
 
 
 def test_run_tests_reports_each_result_and_returns_failure(
+    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    args = Namespace(dbtalk_command="dbtalk", timeout=3)
+    config_path = tmp_path / "backup_databases.yaml"
+    config_path.write_text(
+        "output_directory: ../data\n"
+        "dsn_values:\n"
+        "  DBTALK_A_DSN: 'sqlite:///a'\n"
+        "  DBTALK_B_DSN: 'sqlite:///b'\n"
+        "connections:\n"
+        "  local:\n"
+        "    engine: mysql\n"
+        "    address: localhost:3306\n"
+        "    databases:\n"
+        "      - name: a\n"
+        "        dsn_env: DBTALK_A_DSN\n"
+        "      - name: b\n"
+        "        dsn_env: DBTALK_B_DSN\n",
+        encoding="utf-8",
+    )
+    args = Namespace(config=config_path, dbtalk_command="dbtalk", timeout=3)
     with (
-        patch.object(
-            backup_databases,
-            "load_dsn_environment_names",
-            return_value=("DBTALK_A_DSN", "DBTALK_B_DSN"),
-        ),
-        patch.object(backup_databases, "load_connection_environment"),
         patch.object(backup_databases, "resolve_command", return_value="dbtalk"),
         patch.object(backup_databases, "run_dsn_test", side_effect=[True, False]) as run_test,
         caplog.at_level(logging.INFO),
@@ -209,8 +250,8 @@ def test_run_tests_reports_each_result_and_returns_failure(
         result = backup_databases.run_tests(args)
 
     assert result == 1
-    assert run_test.call_args_list[0].args == ("dbtalk", "DBTALK_A_DSN", 3)
-    assert run_test.call_args_list[1].args == ("dbtalk", "DBTALK_B_DSN", 3)
+    assert run_test.call_args_list[0].args[:3] == ("dbtalk", "DBTALK_A_DSN", 3)
+    assert run_test.call_args_list[1].args[:3] == ("dbtalk", "DBTALK_B_DSN", 3)
     messages = [record.getMessage() for record in caplog.records]
     assert any(message.startswith("dsn test passed ") for message in messages)
     assert any(message.startswith("dsn test failed ") for message in messages)
