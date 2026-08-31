@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import shlex
 import subprocess
 import sys
 from argparse import Namespace
@@ -66,6 +67,7 @@ def test_output_path_does_not_include_batch_timestamp(tmp_path: Path) -> None:
     target = backup_databases.BackupTarget(
         engine="postgres",
         connection="10.0.0.1:5432",
+        connection_name="remote",
         database="app",
         dsn_env="DBTALK_APP_DSN",
         output_label="postgres-remote-10.0.0.1-5432",
@@ -81,8 +83,17 @@ def test_manifest_is_written_inside_batch_directory_with_relative_output(tmp_pat
     target = backup_databases.BackupTarget(
         engine="mysql",
         connection="10.0.0.1:3306",
+        connection_name="think_mysql",
         database="app",
         dsn_env="DBTALK_APP_DSN",
+        output_label="mysql-remote-10.0.0.1-3306",
+    )
+    second_target = backup_databases.BackupTarget(
+        engine="mysql",
+        connection="10.0.0.1:3306",
+        connection_name="think_mysql",
+        database="audit",
+        dsn_env="DBTALK_AUDIT_DSN",
         output_label="mysql-remote-10.0.0.1-3306",
     )
     artifact = backup_databases.BackupArtifact(
@@ -90,25 +101,37 @@ def test_manifest_is_written_inside_batch_directory_with_relative_output(tmp_pat
         destination=batch_directory / "mysql-remote-10.0.0.1-3306-app.sql.gz",
         size_bytes=12,
     )
+    second_artifact = backup_databases.BackupArtifact(
+        target=second_target,
+        destination=batch_directory / "mysql-remote-10.0.0.1-3306-audit.sql.gz",
+        size_bytes=14,
+    )
 
     manifest_path = tmp_path / "manifest.md"
     with patch.object(backup_databases, "manifest_path", return_value=manifest_path):
         manifest = backup_databases.write_manifest(
             tmp_path / "backup_databases.yaml",
-            [artifact],
+            [artifact, second_artifact],
             batch_directory,
             "20260831-120000",
         )
 
     assert manifest == manifest_path
-    assert "| Backup file | `mysql-remote-10.0.0.1-3306-app.sql.gz` |" in manifest.read_text(
-        encoding="utf-8"
-    )
+    content = manifest.read_text(encoding="utf-8")
+    assert "## 1. `think_mysql`" in content
+    assert "| Address | `10.0.0.1:3306` |" in content
+    assert "### 1.1 `app`" in content
+    assert "### 1.2 `audit`" in content
+    assert content.count("## 1. `think_mysql`") == 1
+    assert "| Backup file | `mysql-remote-10.0.0.1-3306-app.sql.gz` |" in content
 
 
-def test_run_dsn_test_uses_read_only_database_query() -> None:
+def test_run_dsn_test_uses_read_only_database_query(caplog: pytest.LogCaptureFixture) -> None:
     completed = subprocess.CompletedProcess([], 0, "", "")
-    with patch.object(backup_databases.subprocess, "run", return_value=completed) as run:
+    with (
+        patch.object(backup_databases.subprocess, "run", return_value=completed) as run,
+        caplog.at_level(logging.INFO),
+    ):
         assert backup_databases.run_dsn_test("dbtalk", "DBTALK_APP_DSN", 7) is True
 
     command = run.call_args.args[0]
@@ -128,6 +151,44 @@ def test_run_dsn_test_uses_read_only_database_query() -> None:
     assert run.call_args.kwargs["cwd"] == backup_databases.REPOSITORY_ROOT
     assert run.call_args.kwargs["capture_output"] is True
     assert run.call_args.kwargs["check"] is False
+    assert "dbtalk command=dbtalk database query --dsn-env DBTALK_APP_DSN" in caplog.text
+
+
+def test_run_dump_logs_the_dbtalk_command(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    destination = tmp_path / "backup.sql.gz"
+    target = backup_databases.BackupTarget(
+        engine="mysql",
+        connection="127.0.0.1:3306",
+        connection_name="local",
+        database="app",
+        dsn_env="DBTALK_APP_DSN",
+        output_label="mysql-local-127.0.0.1-3306",
+    )
+    completed = subprocess.CompletedProcess([], 0, "", "")
+
+    def create_output(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        destination.write_bytes(b"backup")
+        return completed
+
+    with (
+        patch.object(backup_databases.subprocess, "run", side_effect=create_output) as run,
+        caplog.at_level(logging.INFO),
+    ):
+        backup_databases.run_dump("dbtalk", target, destination)
+
+    assert run.call_args.args[0] == [
+        "dbtalk",
+        "mysql",
+        "dump",
+        "--dsn-env",
+        "DBTALK_APP_DSN",
+        "--output",
+        str(destination),
+        "--archive",
+    ]
+    assert f"dbtalk command={shlex.join(run.call_args.args[0])}" in caplog.text
 
 
 def test_run_tests_reports_each_result_and_returns_failure(

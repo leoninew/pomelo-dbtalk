@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,7 @@ Engine = Literal["mysql", "postgres"]
 class BackupTarget:
     engine: Engine
     connection: str
+    connection_name: str
     database: str
     dsn_env: str
     output_label: str
@@ -182,6 +184,7 @@ def load_backup_config(config_path: Path) -> BackupConfig:
                 BackupTarget(
                     engine=engine,
                     connection=address,
+                    connection_name=connection_name,
                     database=_required_string(database_config, "name", database_context),
                     dsn_env=_required_string(database_config, "dsn_env", database_context),
                     output_label=output_label,
@@ -310,28 +313,46 @@ def write_manifest(
         "the environment variable shown below.",
         "",
     ]
-    for index, artifact in enumerate(artifacts, 1):
-        target = artifact.target
-        format_name = (
-            "PostgreSQL custom archive" if target.engine == "postgres" else "MySQL SQL dump (gzip)"
-        )
-        relative_output = artifact.destination.relative_to(batch_directory).as_posix()
+    grouped_artifacts: dict[str, list[BackupArtifact]] = {}
+    for artifact in artifacts:
+        grouped_artifacts.setdefault(artifact.target.connection_name, []).append(artifact)
+
+    for connection_index, (connection_name, connection_artifacts) in enumerate(
+        grouped_artifacts.items(), 1
+    ):
+        connection_target = connection_artifacts[0].target
         lines.extend(
             [
-                f"## {index}. {markdown_value(target.database)}",
+                f"## {connection_index}. {markdown_value(connection_name)}",
                 "",
                 "| Field | Value |",
                 "| --- | --- |",
-                f"| Engine | {markdown_value(target.engine)} |",
-                f"| Source connection | {markdown_value(target.connection)} |",
-                f"| Database | {markdown_value(target.database)} |",
-                f"| DSN environment variable | {markdown_value(target.dsn_env)} |",
-                f"| Backup file | {markdown_value(relative_output)} |",
-                f"| Format | {format_name} |",
-                f"| Size (bytes) | `{artifact.size_bytes}` |",
+                f"| Engine | {markdown_value(connection_target.engine)} |",
+                f"| Address | {markdown_value(connection_target.connection)} |",
                 "",
             ]
         )
+        for database_index, artifact in enumerate(connection_artifacts, 1):
+            target = artifact.target
+            format_name = (
+                "PostgreSQL custom archive"
+                if target.engine == "postgres"
+                else "MySQL SQL dump (gzip)"
+            )
+            relative_output = artifact.destination.relative_to(batch_directory).as_posix()
+            lines.extend(
+                [
+                    f"### {connection_index}.{database_index} {markdown_value(target.database)}",
+                    "",
+                    "| Field | Value |",
+                    "| --- | --- |",
+                    f"| DSN environment variable | {markdown_value(target.dsn_env)} |",
+                    f"| Backup file | {markdown_value(relative_output)} |",
+                    f"| Format | {format_name} |",
+                    f"| Size (bytes) | `{artifact.size_bytes}` |",
+                    "",
+                ]
+            )
 
     try:
         destination.write_text("\n".join(lines), encoding="utf-8")
@@ -353,6 +374,7 @@ def run_dump(dbtalk: str, target: BackupTarget, destination: Path) -> None:
     if target.engine == "mysql":
         command.append("--archive")
 
+    logging.info("dbtalk command=%s", shlex.join(command))
     result = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,
@@ -385,6 +407,7 @@ def run_dsn_test(dbtalk: str, dsn_env: str, timeout_seconds: int) -> bool:
         "--format",
         "json",
     ]
+    logging.info("dbtalk command=%s", shlex.join(command))
     result = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,
