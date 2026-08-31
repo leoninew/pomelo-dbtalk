@@ -30,25 +30,29 @@ def test_parser_places_existing_options_under_backup() -> None:
     assert test_args.timeout == 7
 
 
-def test_load_backup_config_reads_dsn_values_from_dynaconf_yaml(tmp_path: Path) -> None:
+def test_resolve_command_preserves_path_command_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backup_databases.shutil, "which", lambda command: "/bin/dbtalk")
+
+    assert backup_databases.resolve_command("dbtalk") == "dbtalk"
+
+
+def test_load_backup_config_reads_inline_dsn_from_dynaconf_yaml(tmp_path: Path) -> None:
     config_path = tmp_path / "backup_databases.yaml"
     config_path.write_text(
         "output_directory: ../data\n"
-        "dsn_values:\n"
-        "  DBTALK_APP_DSN: 'sqlite:///app.db'\n"
         "connections:\n"
         "  local:\n"
         "    engine: mysql\n"
         "    address: localhost:3306\n"
         "    databases:\n"
         "      - name: app\n"
-        "        dsn_env: DBTALK_APP_DSN\n",
+        "        dsn: 'sqlite:///app'\n",
         encoding="utf-8",
     )
 
     config = backup_databases.load_backup_config(config_path)
 
-    assert config.dsn_values == {"DBTALK_APP_DSN": "sqlite:///app.db"}
+    assert config.targets[0].dsn == "sqlite:///app"
     assert config.targets[0].database == "app"
 
 
@@ -58,22 +62,53 @@ def test_load_backup_config_uses_process_environment_override(
     config_path = tmp_path / "backup_databases.yaml"
     config_path.write_text(
         "output_directory: ../data\n"
-        "dsn_values:\n"
-        "  DBTALK_APP_DSN: 'sqlite:///yaml'\n"
         "connections:\n"
         "  local:\n"
         "    engine: mysql\n"
         "    address: localhost:3306\n"
         "    databases:\n"
         "      - name: app\n"
-        "        dsn_env: DBTALK_APP_DSN\n",
+        "        dsn: 'sqlite:///yaml'\n"
+        "        enabled: true\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("DBTALK_DSN_VALUES__DBTALK_APP_DSN", "sqlite:///env")
+    monkeypatch.setenv("DBTALK_OUTPUT_DIRECTORY", "../overridden-data")
 
     config = backup_databases.load_backup_config(config_path)
 
-    assert config.dsn_values["DBTALK_APP_DSN"] == "sqlite:///env"
+    assert config.targets[0].dsn == "sqlite:///yaml"
+    assert config.output_directory == (tmp_path / "../overridden-data").resolve()
+
+
+def test_disabled_targets_are_skipped_by_connection_tests(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config_path = tmp_path / "backup_databases.yaml"
+    config_path.write_text(
+        "output_directory: ../data\n"
+        "connections:\n"
+        "  local:\n"
+        "    engine: mysql\n"
+        "    address: localhost:3306\n"
+        "    databases:\n"
+        "      - name: enabled\n"
+        "        dsn: 'sqlite:///enabled'\n"
+        "        enabled: true\n"
+        "      - name: disabled\n"
+        "        dsn: 'not-a-dsn'\n"
+        "        enabled: false\n",
+        encoding="utf-8",
+    )
+    args = Namespace(config=config_path, dbtalk_command="dbtalk", timeout=3)
+    with (
+        patch.object(backup_databases, "resolve_command", return_value="dbtalk"),
+        patch.object(backup_databases, "run_dsn_test", return_value=True) as run_test,
+        caplog.at_level(logging.INFO),
+    ):
+        assert backup_databases.run_tests(args) == 0
+
+    assert run_test.call_args.args[:3] == ("dbtalk", "sqlite:///enabled", 3)
+    assert "dsn test skipped connection=local database=disabled enabled=False" in caplog.text
 
 
 def test_batch_directory_uses_timestamp_and_avoids_existing_directory(tmp_path: Path) -> None:
@@ -98,7 +133,8 @@ def test_output_path_does_not_include_batch_timestamp(tmp_path: Path) -> None:
         connection="10.0.0.1:5432",
         connection_name="remote",
         database="app",
-        dsn_env="DBTALK_APP_DSN",
+        dsn="postgresql+psycopg://user:password@host:5432/app",
+        enabled=True,
         output_label="postgres-remote-10.0.0.1-5432",
     )
 
@@ -114,7 +150,8 @@ def test_manifest_is_written_inside_batch_directory_with_relative_output(tmp_pat
         connection="10.0.0.1:3306",
         connection_name="think_mysql",
         database="app",
-        dsn_env="DBTALK_APP_DSN",
+        dsn="mysql+pymysql://user:password@host:3306/app",
+        enabled=True,
         output_label="mysql-remote-10.0.0.1-3306",
     )
     second_target = backup_databases.BackupTarget(
@@ -122,7 +159,8 @@ def test_manifest_is_written_inside_batch_directory_with_relative_output(tmp_pat
         connection="10.0.0.1:3306",
         connection_name="think_mysql",
         database="audit",
-        dsn_env="DBTALK_AUDIT_DSN",
+        dsn="mysql+pymysql://user:password@host:3306/audit",
+        enabled=True,
         output_label="mysql-remote-10.0.0.1-3306",
     )
     artifact = backup_databases.BackupArtifact(
@@ -148,11 +186,11 @@ def test_manifest_is_written_inside_batch_directory_with_relative_output(tmp_pat
     assert manifest == manifest_path
     content = manifest.read_text(encoding="utf-8")
     assert "## 1. `think_mysql`" in content
-    assert "| Address | `10.0.0.1:3306` |" in content
-    assert "### 1.1 `app`" in content
-    assert "### 1.2 `audit`" in content
+    assert "`mysql` at `10.0.0.1:3306`" in content
+    assert "| Database | Backup file | Format | Size |" in content
+    assert "| `app` | `mysql-remote-10.0.0.1-3306-app.sql.gz` |" in content
+    assert "| `audit` | `mysql-remote-10.0.0.1-3306-audit.sql.gz` |" in content
     assert content.count("## 1. `think_mysql`") == 1
-    assert "| Backup file | `mysql-remote-10.0.0.1-3306-app.sql.gz` |" in content
 
 
 def test_run_dsn_test_uses_read_only_database_query(caplog: pytest.LogCaptureFixture) -> None:
@@ -161,7 +199,9 @@ def test_run_dsn_test_uses_read_only_database_query(caplog: pytest.LogCaptureFix
         patch.object(backup_databases.subprocess, "run", return_value=completed) as run,
         caplog.at_level(logging.INFO),
     ):
-        assert backup_databases.run_dsn_test("dbtalk", "DBTALK_APP_DSN", 7) is True
+        assert backup_databases.run_dsn_test(
+            "dbtalk", "sqlite:///app", 7
+        ) is True
 
     command = run.call_args.args[0]
     assert command == [
@@ -169,7 +209,7 @@ def test_run_dsn_test_uses_read_only_database_query(caplog: pytest.LogCaptureFix
         "database",
         "query",
         "--dsn-env",
-        "DBTALK_APP_DSN",
+        "DBTALK_BACKUP_DSN",
         "--sql",
         "SELECT 1",
         "--timeout",
@@ -180,7 +220,7 @@ def test_run_dsn_test_uses_read_only_database_query(caplog: pytest.LogCaptureFix
     assert run.call_args.kwargs["cwd"] == backup_databases.REPOSITORY_ROOT
     assert run.call_args.kwargs["capture_output"] is True
     assert run.call_args.kwargs["check"] is False
-    assert "dbtalk command=dbtalk database query --dsn-env DBTALK_APP_DSN" in caplog.text
+    assert "dbtalk command=dbtalk database query --dsn-env DBTALK_BACKUP_DSN" in caplog.text
 
 
 def test_run_dump_logs_the_dbtalk_command(
@@ -192,7 +232,8 @@ def test_run_dump_logs_the_dbtalk_command(
         connection="127.0.0.1:3306",
         connection_name="local",
         database="app",
-        dsn_env="DBTALK_APP_DSN",
+        dsn="mysql+pymysql://user:password@host:3306/app",
+        enabled=True,
         output_label="mysql-local-127.0.0.1-3306",
     )
     completed = subprocess.CompletedProcess([], 0, "", "")
@@ -212,7 +253,7 @@ def test_run_dump_logs_the_dbtalk_command(
         "mysql",
         "dump",
         "--dsn-env",
-        "DBTALK_APP_DSN",
+        "DBTALK_BACKUP_DSN",
         "--output",
         str(destination),
         "--archive",
@@ -227,18 +268,17 @@ def test_run_tests_reports_each_result_and_returns_failure(
     config_path = tmp_path / "backup_databases.yaml"
     config_path.write_text(
         "output_directory: ../data\n"
-        "dsn_values:\n"
-        "  DBTALK_A_DSN: 'sqlite:///a'\n"
-        "  DBTALK_B_DSN: 'sqlite:///b'\n"
         "connections:\n"
         "  local:\n"
         "    engine: mysql\n"
         "    address: localhost:3306\n"
         "    databases:\n"
         "      - name: a\n"
-        "        dsn_env: DBTALK_A_DSN\n"
+        "        dsn: 'sqlite:///a'\n"
+        "        enabled: true\n"
         "      - name: b\n"
-        "        dsn_env: DBTALK_B_DSN\n",
+        "        dsn: 'sqlite:///b'\n"
+        "        enabled: true\n",
         encoding="utf-8",
     )
     args = Namespace(config=config_path, dbtalk_command="dbtalk", timeout=3)
@@ -250,8 +290,8 @@ def test_run_tests_reports_each_result_and_returns_failure(
         result = backup_databases.run_tests(args)
 
     assert result == 1
-    assert run_test.call_args_list[0].args[:3] == ("dbtalk", "DBTALK_A_DSN", 3)
-    assert run_test.call_args_list[1].args[:3] == ("dbtalk", "DBTALK_B_DSN", 3)
+    assert run_test.call_args_list[0].args[:3] == ("dbtalk", "sqlite:///a", 3)
+    assert run_test.call_args_list[1].args[:3] == ("dbtalk", "sqlite:///b", 3)
     messages = [record.getMessage() for record in caplog.records]
     assert any(message.startswith("dsn test passed ") for message in messages)
     assert any(message.startswith("dsn test failed ") for message in messages)

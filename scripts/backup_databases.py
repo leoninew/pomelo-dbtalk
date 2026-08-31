@@ -33,7 +33,8 @@ class BackupTarget:
     connection: str
     connection_name: str
     database: str
-    dsn_env: str
+    dsn: str
+    enabled: bool
     output_label: str
 
 
@@ -41,7 +42,6 @@ class BackupTarget:
 class BackupConfig:
     output_directory: Path
     targets: tuple[BackupTarget, ...]
-    dsn_values: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -147,6 +147,21 @@ def _parse_engine(values: Mapping[str, object], context: str) -> Engine:
     return cast(Engine, value)
 
 
+def _parse_enabled(values: Mapping[str, object], context: str) -> bool:
+    value = values.get("enabled", False)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    raise BackupError(f"{context}.enabled must be a boolean")
+
+
 def load_backup_config(config_path: Path) -> BackupConfig:
     config_path = config_path.expanduser().resolve()
     if not config_path.is_file():
@@ -194,7 +209,8 @@ def load_backup_config(config_path: Path) -> BackupConfig:
                     connection=address,
                     connection_name=connection_name,
                     database=_required_string(database_config, "name", database_context),
-                    dsn_env=_required_string(database_config, "dsn_env", database_context),
+                    dsn=_required_string(database_config, "dsn", database_context),
+                    enabled=_parse_enabled(database_config, database_context),
                     output_label=output_label,
                 )
             )
@@ -202,48 +218,23 @@ def load_backup_config(config_path: Path) -> BackupConfig:
     if not targets:
         raise BackupError("backup config contains no databases")
 
-    raw_dsn_values = _mapping(config.get("dsn_values", {}), "config.dsn_values")
-    dsn_values: dict[str, str] = {}
-    for name, value in raw_dsn_values.items():
-        if not name.startswith("DBTALK_"):
-            raise BackupError(f"config.dsn_values.{name} must start with DBTALK_")
-        if not isinstance(value, str) or not value.strip():
-            raise BackupError(f"config.dsn_values.{name} must be a non-empty string")
-        dsn_values[name] = value.strip()
-
     return BackupConfig(
         output_directory=output_directory.resolve(),
         targets=tuple(targets),
-        dsn_values=dsn_values,
     )
 
 
-def runtime_environment(dsn_values: Mapping[str, str]) -> dict[str, str]:
-    """Build the child environment, preserving process values over YAML values."""
-
-    environment = os.environ.copy()
-    for name, value in dsn_values.items():
-        environment.setdefault(name, value)
-    return environment
-
-
-def require_dsn_envs(
-    targets: Sequence[BackupTarget], environment: Mapping[str, str] | None = None
-) -> None:
-    values = os.environ if environment is None else environment
-    missing = sorted({target.dsn_env for target in targets if not values.get(target.dsn_env)})
-    if missing:
-        raise BackupError("missing DSN environment variables: " + ", ".join(missing))
-
+def require_dsns(targets: Sequence[BackupTarget]) -> None:
     for target in targets:
-        dsn = values[target.dsn_env]
         try:
-            dsn_database = make_url(dsn).database
+            dsn_database = make_url(target.dsn).database
         except Exception as exc:
-            raise BackupError(f"invalid DSN in environment variable {target.dsn_env}") from exc
+            raise BackupError(
+                f"invalid DSN for {target.connection_name}.{target.database}"
+            ) from exc
         if dsn_database != target.database:
             raise BackupError(
-                f"DSN environment variable {target.dsn_env} targets database "
+                f"DSN for {target.connection_name}.{target.database} targets database "
                 f"{dsn_database or '<none>'}, expected {target.database}"
             )
 
@@ -251,7 +242,8 @@ def require_dsn_envs(
 def resolve_command(command: str) -> str:
     resolved = shutil.which(command)
     if resolved:
-        return resolved
+        # Let subprocess resolve PATH commands so logs retain the configured name.
+        return command
 
     command_path = Path(command)
     if command_path.is_file():
@@ -322,8 +314,7 @@ def write_manifest(
         f"- Output directory: `{display_path(batch_directory)}`",
         f"- Backups: `{len(artifacts)}`",
         "",
-        "DSN values are intentionally omitted. Each backup used the DSN from "
-        "the environment variable shown below.",
+        "DSN values are intentionally omitted from this manifest.",
         "",
     ]
     grouped_artifacts: dict[str, list[BackupArtifact]] = {}
@@ -338,14 +329,14 @@ def write_manifest(
             [
                 f"## {connection_index}. {markdown_value(connection_name)}",
                 "",
-                "| Field | Value |",
-                "| --- | --- |",
-                f"| Engine | {markdown_value(connection_target.engine)} |",
-                f"| Address | {markdown_value(connection_target.connection)} |",
+                f"{markdown_value(connection_target.engine)} at "
+                f"{markdown_value(connection_target.connection)}",
                 "",
+                "| Database | Backup file | Format | Size |",
+                "| --- | --- | --- | ---: |",
             ]
         )
-        for database_index, artifact in enumerate(connection_artifacts, 1):
+        for artifact in connection_artifacts:
             target = artifact.target
             format_name = (
                 "PostgreSQL custom archive"
@@ -355,17 +346,12 @@ def write_manifest(
             relative_output = artifact.destination.relative_to(batch_directory).as_posix()
             lines.extend(
                 [
-                    f"### {connection_index}.{database_index} {markdown_value(target.database)}",
-                    "",
-                    "| Field | Value |",
-                    "| --- | --- |",
-                    f"| DSN environment variable | {markdown_value(target.dsn_env)} |",
-                    f"| Backup file | {markdown_value(relative_output)} |",
-                    f"| Format | {format_name} |",
-                    f"| Size (bytes) | `{artifact.size_bytes}` |",
-                    "",
+                    f"| {markdown_value(target.database)} | "
+                    f"{markdown_value(relative_output)} | {format_name} | "
+                    f"{artifact.size_bytes:,} bytes |",
                 ]
             )
+        lines.append("")
 
     try:
         destination.write_text("\n".join(lines), encoding="utf-8")
@@ -380,12 +366,13 @@ def run_dump(
     destination: Path,
     environment: Mapping[str, str] | None = None,
 ) -> None:
+    dsn_env = "DBTALK_BACKUP_DSN"
     command = [
         dbtalk,
         target.engine,
         "dump",
         "--dsn-env",
-        target.dsn_env,
+        dsn_env,
         "--output",
         str(destination),
     ]
@@ -393,10 +380,12 @@ def run_dump(
         command.append("--archive")
 
     logging.info("dbtalk command=%s", shlex.join(command))
+    child_environment = dict(environment) if environment is not None else os.environ.copy()
+    child_environment[dsn_env] = target.dsn
     result = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,
-        env=dict(environment) if environment is not None else os.environ.copy(),
+        env=child_environment,
         capture_output=True,
         text=True,
         check=False,
@@ -413,10 +402,11 @@ def run_dump(
 
 def run_dsn_test(
     dbtalk: str,
-    dsn_env: str,
+    dsn: str,
     timeout_seconds: int,
     environment: Mapping[str, str] | None = None,
 ) -> bool:
+    dsn_env = "DBTALK_BACKUP_DSN"
     command = [
         dbtalk,
         "database",
@@ -431,10 +421,12 @@ def run_dsn_test(
         "json",
     ]
     logging.info("dbtalk command=%s", shlex.join(command))
+    child_environment = dict(environment) if environment is not None else os.environ.copy()
+    child_environment[dsn_env] = dsn
     result = subprocess.run(
         command,
         cwd=REPOSITORY_ROOT,
-        env=dict(environment) if environment is not None else os.environ.copy(),
+        env=child_environment,
         capture_output=True,
         text=True,
         check=False,
@@ -458,9 +450,9 @@ def run_backups(args: argparse.Namespace) -> int:
     )
 
     dbtalk = None
-    environment = runtime_environment(backup_config.dsn_values)
+    enabled_targets = tuple(target for target in backup_config.targets if target.enabled)
     if not args.dry_run:
-        require_dsn_envs(backup_config.targets, environment)
+        require_dsns(enabled_targets)
         dbtalk = resolve_command(args.dbtalk_command)
         batch_output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -476,6 +468,16 @@ def run_backups(args: argparse.Namespace) -> int:
             target.database,
             display_path(destination),
         )
+        if not target.enabled:
+            logging.info(
+                "backup skipped index=%d/%d connection=%s database=%s enabled=%s",
+                index,
+                total,
+                target.connection_name,
+                target.database,
+                target.enabled,
+            )
+            continue
         if args.dry_run:
             continue
 
@@ -488,7 +490,7 @@ def run_backups(args: argparse.Namespace) -> int:
         )
         assert dbtalk is not None
         started_at = time.perf_counter()
-        run_dump(dbtalk, target, destination, environment)
+        run_dump(dbtalk, target, destination)
         duration_seconds = time.perf_counter() - started_at
         artifact = BackupArtifact(
             target=target,
@@ -522,39 +524,49 @@ def run_backups(args: argparse.Namespace) -> int:
 
 def run_tests(args: argparse.Namespace) -> int:
     backup_config = load_backup_config(args.config)
-    environment = runtime_environment(backup_config.dsn_values)
-    dsn_envs = tuple(
-        sorted(
-            set(backup_config.dsn_values)
-            | {target.dsn_env for target in backup_config.targets}
-        )
-    )
-    require_dsn_envs(backup_config.targets, environment)
+    enabled_targets = tuple(target for target in backup_config.targets if target.enabled)
+    require_dsns(enabled_targets)
     dbtalk = resolve_command(args.dbtalk_command)
 
-    total = len(dsn_envs)
+    total = len(enabled_targets)
     passed = 0
     logging.info("dsn test run started variables=%d timeout_seconds=%d", total, args.timeout)
-    for index, dsn_env in enumerate(dsn_envs, 1):
-        logging.info("dsn test started index=%d/%d variable=%s", index, total, dsn_env)
+    for target in backup_config.targets:
+        if not target.enabled:
+            logging.info(
+                "dsn test skipped connection=%s database=%s enabled=%s",
+                target.connection_name,
+                target.database,
+                target.enabled,
+            )
+    for index, target in enumerate(enabled_targets, 1):
+        logging.info(
+            "dsn test started index=%d/%d connection=%s database=%s",
+            index,
+            total,
+            target.connection_name,
+            target.database,
+        )
         started_at = time.perf_counter()
-        succeeded = run_dsn_test(dbtalk, dsn_env, args.timeout, environment)
+        succeeded = run_dsn_test(dbtalk, target.dsn, args.timeout)
         duration_seconds = time.perf_counter() - started_at
         if succeeded:
             passed += 1
             logging.info(
-                "dsn test passed index=%d/%d variable=%s duration_seconds=%.3f",
+                "dsn test passed index=%d/%d connection=%s database=%s duration_seconds=%.3f",
                 index,
                 total,
-                dsn_env,
+                target.connection_name,
+                target.database,
                 duration_seconds,
             )
         else:
             logging.error(
-                "dsn test failed index=%d/%d variable=%s duration_seconds=%.3f",
+                "dsn test failed index=%d/%d connection=%s database=%s duration_seconds=%.3f",
                 index,
                 total,
-                dsn_env,
+                target.connection_name,
+                target.database,
                 duration_seconds,
             )
 

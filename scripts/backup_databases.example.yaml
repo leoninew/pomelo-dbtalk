@@ -1,8 +1,5 @@
-# Copy this file to backup_databases.yaml and replace the placeholders.
+# Copy this file to backup_databases.yaml and fill in the DSNs.
 output_directory: ../data
-
-dsn_values:
-  DBTALK_EXAMPLE_DSN: "mysql+pymysql://<user>:<password>@<host>:3306/<database>"
 
 connections:
   example:
@@ -10,4 +7,5 @@ connections:
     address: "<host>:3306"
     databases:
       - name: "<database>"
-        dsn_env: DBTALK_EXAMPLE_DSN
+        dsn: "mysql+pymysql://<user>:<password>@<host>:3306/<database>"
+        enabled: false
