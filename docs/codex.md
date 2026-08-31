@@ -33,10 +33,11 @@ skills 会先通过相应的 `--help` 确认可用参数，并复用 CLI 的安�
 `dbtalk-mysql` 的 dump/restore 使用本机客户端，或回退到本机已有 Docker `mysql` 镜像；数据库管理命令不调用
 这些客户端。`dbtalk-database` 仅传输既有 schema 的数据；导入前必须明确目标库、制品来源和写入授权。
 
-`dbtalk-postgres` 优先使用本机 `pg_dump` / `pg_restore`，缺失时只使用配置的本地 PostgreSQL Docker
-image（默认 `postgres:18`）；不会拉取 image。它只处理 custom archive，不等同于 PostgreSQL 的
-物理备份或 JSONL 数据传输。`dbtalk-postgres database` 独立处理 PostgreSQL database 生命周期，
-不调用 `pg_dump` / `pg_restore`。
+`dbtalk-postgres` 对本机 DSN 的唯一端口映射容器优先复用其 `docker exec` 和默认 Unix socket；未识别到
+唯一映射容器时使用本机 `pg_dump` / `pg_restore`，缺失时只使用配置的本地 PostgreSQL Docker image
+（默认 `postgres:18`）；不会拉取 image。它只处理 custom archive，不等同于 PostgreSQL 的物理备份或
+JSONL 数据传输。`dbtalk-postgres database` 独立处理 PostgreSQL database 生命周期，不调用
+`pg_dump` / `pg_restore`。
 
 两个方言的 user/role、grant/revoke 命令均使用管理 DSN 和结构化参数，不接收原始 SQL。密码仅可通过
 `--password-env` 引用；启用、禁用、轮换、删除、授权和撤销需要 `--yes`，且不能修改当前管理身份。

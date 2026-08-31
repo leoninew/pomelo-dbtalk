@@ -1,5 +1,5 @@
 # PostgreSQL 单库逻辑备份与还原验证
-最后修改时间: 2026-08-23 14:10:52
+最后修改时间: 2026-08-31 17:57:29
 
 ---
 Review status: Accepted
@@ -9,116 +9,116 @@ Stage: Verification
 
 ## Requirement alignment
 
-已实现 `dbtalk postgres dump` 和 `dbtalk postgres restore`，以原生 `pg_dump` / `pg_restore`
-处理单个 PostgreSQL 数据库的 custom archive：
+本次增量实现继续落实已接受的 PostgreSQL 单库逻辑备份与还原需求，并补齐与 MySQL 对齐的本机 Docker
+容器复用规则：
 
-- dump 只生成 `.dump` custom archive，支持 `--compression-level 0..9`，不复用 MySQL 的 gzip
-  `--archive` 语义。
-- restore 在写入前执行 `pg_restore --list`，支持显式 `--clean --if-exists`、`--jobs`，默认传递
-  `--no-owner --no-privileges`，并可显式保留 owner 或 ACL。
-- 连接只接受 `postgresql+psycopg://` 的 `--dsn` / `--dsn-env`；子进程 argv 不含密码。本机客户端使用
-  临时 `.pgpass`，Docker fallback 通过受控的 `PGPASSWORD` 环境变量传递凭据。
-- 本机 `pg_dump` / `pg_restore` 缺失时，使用配置的本地 Docker image；默认 `postgres:18`，不拉取 image。
-- 已增加 PostgreSQL CLI、配置、文档和 Codex skill；既有 MySQL 和 JSONL 命令未改变。
+- 对 `localhost`/`127.0.0.1` 且端口唯一映射到运行中 PostgreSQL 容器的 DSN，dump/restore 优先使用
+  该容器内的原生 `pg_dump`/`pg_restore`。
+- mapped 路径使用容器默认 Unix socket，不经过 `host.docker.internal`；无唯一映射容器时才回到本机
+  客户端，再回退到配置的本地 Docker image。
+- mapped dump 使用容器临时 archive 和 `docker cp` 取回；mapped restore 在容器内完成 archive
+  `pg_restore --list` 预检和实际恢复，并在成功或失败后清理临时 archive。
+- 原有 custom archive、owner/ACL、clean、jobs、DSN 凭据保护和 Docker fallback 语义保持不变。
 
 ## Plan alignment
 
-- 计划中的 `postgres` 配置和 root command 注册已完成，包含 `output_directory` 与可覆盖的
-  `client_image`。
-- native/Docker 客户端边界、临时凭据文件、Docker host mapping、bind mount、archive 原子输出和恢复预检
-  已完成。
-- 实现中发现 Windows 使用 `Path("/backup")` 会产生反斜杠容器路径，使 Docker `pg_dump` 写入容器临时
-  文件系统而非 bind mount。已改用 `PurePosixPath`，并增加回归断言；属于计划中 Docker bind mount
-  风险的修复，没有扩大功能范围。
-- standard 流程未创建独立 Spec，按已接受 Requirement 和 Plan 验证。
+- 已更新历史 Requirement 和 Plan，明确 mapped-container 复用是 PostgreSQL 的客户端选择规则。
+- `src/dbtalk/postgres/client.py` 新增 `docker_mapped_postgres_container()`，按运行状态和发布端口只接受
+  唯一容器。
+- `src/dbtalk/postgres/dump.py` 和 `restore.py` 分别增加 mapped dump/restore 实现；mapped 模式的
+  libpq URI 不含外部 host/port，使用 Unix socket。
+- 原有未命中 mapped 容器时的本机客户端和临时 Docker image fallback 保留。
+- standard 模式不创建独立 Spec；按已接受 Requirement 和 Plan 验证。
 
 ## Actual diff summary
 
-- 新增 `src/dbtalk/postgres/`，实现 native client、Docker fallback、custom dump、restore 与 Click
-  适配。
-- 注册 `dbtalk postgres`，并扩展 typed settings、YAML 和环境变量示例，以默认 `postgres:18` 支持
-  可配置 Docker client image。
-- 新增 PostgreSQL 单测，扩展 root CLI 与 settings 覆盖。
-- 新增 PostgreSQL 手册和 Codex skill，更新 README、Codex 文档、插件 metadata 与包描述。
-- 新增本功能的 Requirement、Plan 和 Verification 过程文档。
+- 修改 PostgreSQL client、dump、restore，实现本机端口映射容器探测和复用。
+- 增加 mapped dump/restore、archive 复制、临时文件清理和 socket URI 回归测试。
+- 更新 PostgreSQL Requirement、Plan、手册、Codex 边界和 skill，使过程文档与实现一致。
 
 ## Expected vs actual files
 
-计划列出的 CLI、PostgreSQL package、配置、测试、README、手册、Codex skill 和 plugin metadata 均已
-修改或新增。实现额外修改了 `pyproject.toml` 的项目描述，使发布元数据覆盖 PostgreSQL backup/restore；
-该改动与功能范围一致。
+本次增量实际修改文件：
 
-工作区另有 `docs/requirement/20260823-database-management.md` 和
-`docs/requirement/20260823-user-management.md` 两份无关未跟踪文档；它们不属于本功能，未纳入验证或暂存。
+- `src/dbtalk/postgres/client.py`
+- `src/dbtalk/postgres/dump.py`
+- `src/dbtalk/postgres/restore.py`
+- `tests/test_postgres.py`
+- `docs/requirement/20260823-postgresql-backup-restore.md`
+- `docs/plan/20260823-postgresql-backup-restore.md`
+- `docs/postgres.md`
+- `docs/codex.md`
+- `plugins/dbtalk/skills/dbtalk-postgres/SKILL.md`
+- `docs/verification/20260823-postgresql-backup-restore.md`
+
+这些文件均属于本次 PostgreSQL 容器复用范围；未修改 MySQL 或 JSONL 产品逻辑。
 
 ## Acceptance checklist
 
-- [x] `dump` / `restore` 仅接受 canonical PostgreSQL DSN 的 `--dsn` / `--dsn-env` 二选一。
-- [x] dump 生成 custom `.dump`，支持默认输出路径、显式输出路径及 archive compression level。
-- [x] custom archive 可直接由 `pg_restore` 消费，未实现外层 gzip。
-- [x] restore 在写入前验证 archive，支持 clean/if-exists 约束、parallel jobs 与 owner/ACL 策略。
-- [x] 默认优先本机客户端；缺失时仅使用配置且已存在的 Docker image，不安装或拉取依赖。
-- [x] 密码不进入 client argv、正常输出或日志；本机临时 `.pgpass` 在命令结束时清理。
-- [x] 单元测试覆盖本机路径、Docker fallback、凭据处理、archive 预检和危险选项约束。
-- [x] 文档、Codex skill 和 plugin metadata 与 CLI 行为一致。
+- [x] 本机 mapped PostgreSQL 容器按 `docker ps --filter status=running --filter publish=<port>` 探测，
+      只有唯一结果才进入复用路径。
+- [x] mapped dump 和 restore 均通过 `docker exec` 使用容器内原生客户端和默认 Unix socket。
+- [x] mapped restore 的 archive 预检和实际恢复均在已有容器内执行，临时 archive 在 finally 路径清理。
+- [x] 无 mapped 容器时保留本机客户端优先、配置 Docker image fallback 的既有顺序。
+- [x] mapped 命令 argv 不包含 `host.docker.internal` 或密码；Docker 密码仅通过 `PGPASSWORD` 环境传递。
+- [x] custom archive、输入校验、clean/if-exists、owner/ACL 和 jobs 行为保持通过。
+- [x] Requirement、Plan、手册、Codex 文档和 PostgreSQL skill 已同步更新。
 
 ## Test results
 
 ### Automated checks
 
-以下检查均通过：
+以下检查通过：
 
 ```text
-uv run pytest                         120 passed, 1 skipped, coverage 91.06%
-uv run ruff check .                   passed
-uv run ruff format --check .          passed
-uv run mypy src tests                 passed
-uv lock --check                       passed
-uv build                              passed
-git diff --check                      passed
-plugin validation                     passed
+uv run --locked --no-sync pytest -q                              210 passed, 1 skipped, 5 subtests passed
+uv run --locked --no-sync ruff check src tests                   passed
+uv run --locked --no-sync mypy src tests                         passed
+uv lock --check                                                  passed
+uv build                                                          passed
+uv run --locked --no-sync python scripts/install.py plugin check  passed
+git diff --check                                                  passed
 ```
 
-当前 Windows 环境没有 `make`，因此按 Makefile 定义直接执行了等价的 pytest、Ruff 和 Mypy 命令。
-`uv build` 仅报告现有 `uv-build` 版本约束与当前 uv 版本不匹配的 warning，source distribution 和 wheel
-均成功生成。
+CLI 合同检查通过：`postgres dump --help` 展示 custom archive 和 compression 参数，`postgres restore
+--help` 展示 `--clean`、`--if-exists`、owner/ACL 和 `--jobs`。
+
+本次触碰的 Python 文件通过 Ruff format check。全仓库 format check 仍报告既有的
+`tests/test_backup_databases.py` 格式差异；该文件与本次变更无关，因此未修改。
+
+### Mapped-container coverage
+
+新增单测覆盖：
+
+- mapped dump 优先于宿主机 `pg_dump` 和临时 Docker image；
+- mapped restore 的 archive copy、容器内 `pg_restore --list`、实际恢复和清理；
+- mapped URI 不使用 `host.docker.internal`，且只在唯一端口映射容器时命中。
+
+当前 Docker daemon 的只读检查发现一个 `postgres:18` 容器发布 `127.0.0.1:5432`，容器内
+`pg_dump`/`pg_restore` 版本为 18.6。未使用未知凭据执行真实恢复写入。
 
 ### PostgreSQL integration
 
-首次使用用户提供的本机 PostgreSQL 连接完成真实集成验证。认证成功，服务端实际版本为 PostgreSQL
-16.15；本机没有 native client 或 `postgres:18` image，因此仅在首次命令中覆盖为本地已有的 `postgres:16`
-image，不修改项目默认配置。
-
-验证过程创建随机临时源库和目标库，在源库中创建外键关联表、两行数据与视图，然后执行：
-
-1. Docker fallback `dump --compression-level 6`，成功生成 3283-byte custom archive。
-2. Docker fallback restore 的 archive `--list` 预检及 `--jobs 2` 恢复，目标库查询验证两行数据和视图结果。
-3. 针对临时目标库执行 `--clean --if-exists --jobs 2 --preserve-owner --preserve-privileges`，再次验证表行数。
-4. 删除两个随机临时数据库，并查询确认它们不再存在。
-
-后续在升级后的 PostgreSQL 18.6 服务端，使用默认 `postgres:18` Docker client image 完成同一真实集成验证：
-
-1. Docker fallback `dump --compression-level 6` 成功生成 3554-byte custom archive。
-2. restore 内置 archive `--list` 预检及 `--jobs 2` 恢复均成功；表行数、库存数量总和和视图结果均为
-   `2|14|2`。
-3. 向目标库写入额外测试数据后，执行
-   `--clean --if-exists --jobs 2 --preserve-owner --preserve-privileges`；二次校验仍为 `2|14|2`，证明清理
-   恢复生效。
-4. 删除两个随机临时数据库，并查询确认它们不再存在。
+未执行真实 mapped dump/restore 集成：当前没有用户明确提供的 PostgreSQL DSN、目标数据库和凭据。为避免
+在未知目标库上产生写入，未从容器或其他配置猜测认证信息。历史 verification 中已有 PostgreSQL 16.15
+和 18.6 的 Docker fallback 集成记录，但不替代本次 mapped-container 真实写入验证。
 
 ## Missed or expanded scope
 
-- 无物理备份、`pg_dumpall`、role/tablespace、plain SQL、directory format 或参数透传实现，符合 Non-goal。
-- 运行策略阻止删除两次集成测试生成的 `.dump` 制品；所有临时数据库均已删除，archive 位于忽略的
-  `data/` 目录且不属于 Git 变更。
+- 本次只补齐已有 PostgreSQL dump/restore 的容器复用路径，没有引入新的备份格式、数据库生命周期操作或
+  MySQL 行为变更。
+- 未执行真实 mapped PostgreSQL restore；这是外部 DSN/凭据条件缺失，不是单元实现失败。
 
 ## Risks and incomplete items
 
-- `--clean` 恢复不能整体回滚，生产使用前仍需确认目标数据库和 archive 来源。
-- 恢复跨环境时，extension、role 和权限兼容性仍由 PostgreSQL 原生语义决定。
+- `docker ps` 只按运行状态和发布端口判断唯一容器，不额外验证镜像类型；唯一映射到非 PostgreSQL 容器时，
+  容器内客户端命令会显式失败，不会静默切换到其他目标。
+- mapped restore 使用 `docker cp` 把 archive 放入数据库容器，容器临时目录需要可写空间；清理失败会被抑制，
+  但主命令错误仍会返回。
+- restore 仍遵循 `pg_restore` 的部分失败语义，不能整体回滚；`--clean` 仍是破坏性选项。
 
 ## Conclusion
 
-Requirement、Plan 与实际 diff 一致；自动检查以及 PostgreSQL 16.15 与 18.6 的真实 Docker fallback
-dump/restore 均通过。除受策略限制而保留的忽略 archive 外，没有阻止交付的问题。用户已确认验证通过，
-本功能可作为一个独立提交暂存。
+Requirement、Plan 与实际 diff 一致。PostgreSQL dump/restore 的 mapped-container 复用已实现并由定向和
+全量自动检查覆盖；所有自动检查通过。真实 mapped PostgreSQL 写入集成因缺少明确 DSN/凭据未执行，属于
+交付前需要用户在目标环境补充的验证项。

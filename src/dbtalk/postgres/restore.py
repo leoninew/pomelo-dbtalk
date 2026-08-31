@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
+import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath
 
@@ -13,6 +15,7 @@ from .client import (
     docker_bind_mount,
     docker_database_host,
     docker_host_gateway_args,
+    docker_mapped_postgres_container,
     docker_password_environment,
     docker_postgres_image,
     ensure_command_succeeded,
@@ -38,14 +41,19 @@ def pg_restore_command_args(
     input_path: PurePath,
     *,
     docker: bool = False,
+    mapped_container: bool = False,
 ) -> list[str]:
     """Build a password-free ``pg_restore`` command vector."""
 
-    host = docker_database_host(options.connection.host) if docker else None
+    host: str | None
+    if mapped_container:
+        host = ""
+    else:
+        host = docker_database_host(options.connection.host) if docker else None
     args = [
         "pg_restore",
         "--dbname",
-        options.connection.libpq_uri(host=host),
+        options.connection.libpq_uri(host=host, socket=mapped_container),
         "--exit-on-error",
     ]
     if options.clean:
@@ -70,7 +78,13 @@ def restore_database(options: PostgresRestoreOptions) -> Path:
     input_path = options.input.resolve()
     if not input_path.is_file():
         raise click.ClickException(f"PostgreSQL dump input file does not exist: {input_path}")
-    _validate_archive(options, input_path)
+    container_id = docker_mapped_postgres_container(
+        options.connection.host, options.connection.port
+    )
+    _validate_archive(options, input_path, container_id=container_id)
+    if container_id is not None:
+        _restore_with_mapped_container(options, input_path, container_id)
+        return input_path
     if shutil.which("pg_restore") is not None:
         _restore_with_local_client(options, input_path)
         return input_path
@@ -81,7 +95,15 @@ def restore_database(options: PostgresRestoreOptions) -> Path:
     return input_path
 
 
-def _validate_archive(options: PostgresRestoreOptions, input_path: Path) -> None:
+def _validate_archive(
+    options: PostgresRestoreOptions,
+    input_path: Path,
+    *,
+    container_id: str | None = None,
+) -> None:
+    if container_id is not None:
+        _validate_archive_with_mapped_container(options, input_path, container_id)
+        return
     if shutil.which("pg_restore") is not None:
         result = run_command(["pg_restore", "--list", str(input_path)])
         ensure_command_succeeded(result, "pg_restore archive validation")
@@ -110,6 +132,60 @@ def _restore_with_local_client(options: PostgresRestoreOptions, input_path: Path
     with pgpass_environment(options.connection) as environment:
         result = run_command(pg_restore_command_args(options, input_path), environment)
     ensure_command_succeeded(result, "pg_restore")
+
+
+def _validate_archive_with_mapped_container(
+    options: PostgresRestoreOptions, input_path: Path, container_id: str
+) -> None:
+    container_input = f"/tmp/dbtalk-pg-restore-{uuid.uuid4().hex}.dump"
+    environment = docker_password_environment(options.connection)
+    try:
+        copy_command = ["docker", "cp", str(input_path), f"{container_id}:{container_input}"]
+        ensure_command_succeeded(run_command(copy_command, environment), "Container archive copy")
+        command = [
+            "docker",
+            "exec",
+            "--env",
+            "PGPASSWORD",
+            container_id,
+            "pg_restore",
+            "--list",
+            container_input,
+        ]
+        result = run_command(command, environment)
+        ensure_command_succeeded(result, "Container pg_restore archive validation")
+    finally:
+        with contextlib.suppress(OSError):
+            run_command(["docker", "exec", container_id, "rm", "-f", container_input])
+
+
+def _restore_with_mapped_container(
+    options: PostgresRestoreOptions, input_path: Path, container_id: str
+) -> None:
+    """Run pg_restore inside the mapped database container over its Unix socket."""
+
+    container_input = f"/tmp/dbtalk-pg-restore-{uuid.uuid4().hex}.dump"
+    environment = docker_password_environment(options.connection)
+    try:
+        copy_command = ["docker", "cp", str(input_path), f"{container_id}:{container_input}"]
+        ensure_command_succeeded(run_command(copy_command, environment), "Container archive copy")
+        command = [
+            "docker",
+            "exec",
+            "--env",
+            "PGPASSWORD",
+            container_id,
+            *pg_restore_command_args(
+                options,
+                PurePosixPath(container_input),
+                mapped_container=True,
+            ),
+        ]
+        result = run_command(command, environment)
+        ensure_command_succeeded(result, "Container pg_restore")
+    finally:
+        with contextlib.suppress(OSError):
+            run_command(["docker", "exec", container_id, "rm", "-f", container_input])
 
 
 def _restore_with_docker(

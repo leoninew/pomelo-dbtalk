@@ -1,5 +1,5 @@
 # PostgreSQL 单库逻辑备份与还原计划
-最后修改时间: 2026-08-23 10:59:09
+最后修改时间: 2026-08-31 15:52:55
 
 ---
 Review status: Accepted
@@ -17,9 +17,10 @@ standard 模式不单独创建 Spec；接口和实施决策在本计划中固定
 
 ## Plan assumptions
 
-1. 第一版优先使用本机 `pg_dump` 与 `pg_restore`；客户端缺失时，回退到 `postgres.client_image` 配置的
-   本地 Docker image，默认 `postgres:18`。实现只检查本地 image，不自动拉取或根据服务端版本猜测 tag。
-   用户可为更高 major 源库配置兼容 image。
+1. DSN 指向 `localhost`/`127.0.0.1` 且端口唯一映射到运行中 PostgreSQL 容器时，优先复用该容器内的
+   native client 和默认 Unix socket；未识别到唯一映射容器时才优先使用本机 `pg_dump`/`pg_restore`，
+   客户端缺失再回退到 `postgres.client_image` 配置的本地 Docker image，默认 `postgres:18`。实现只
+   检查本地 image，不自动拉取或根据服务端版本猜测 tag。用户可为更高 major 源库配置兼容 image。
 2. restore 默认传递 `--no-owner --no-privileges`，以优先支持不同账号和环境间的恢复；命令提供显式的
    preserve 模式后才恢复 archive 中的 owner/ACL。role 和 tablespace 仍不在 dump 范围内。
 3. 第一版以 PostgreSQL 18+ 为主流版本基线，不实现旧 major 兼容分支。命令和文档仍保留原生兼容约束：
@@ -47,9 +48,12 @@ standard 模式不单独创建 Spec；接口和实施决策在本计划中固定
      子进程；正确转义 `\\` 与 `:`，并在成功、失败和异常路径清理。Docker 路径通过继承的子进程环境
      及 `--env PGPASSWORD` 注入密码值，命令行只出现变量名而不包含密码。两条路径的 stderr/stdout 都经
      统一错误映射处理，不回显 DSN 或凭据。
-   - Docker fallback 复用 MySQL 的宿主机地址映射规则：本机地址改为 `host.docker.internal`，非 Windows
-     系统附加 host-gateway 映射。备份输出目录和恢复输入文件以 bind mount 传入容器，不复制 archive
-     内容，不留持久容器。
+   - 对本机端口唯一映射的运行中 PostgreSQL 容器，使用 `docker ps --filter publish=<port>` 探测并以
+     `docker exec` 调用容器内客户端；mapped dump/restore 的 archive 通过临时文件和 `docker cp` 传输，
+     完成后清理容器内临时文件。
+   - 无唯一映射容器时，Docker fallback 复用 MySQL 的宿主机地址映射规则：本机地址改为
+     `host.docker.internal`，非 Windows 系统附加 host-gateway 映射。备份输出目录和恢复输入文件以
+     bind mount 传入临时容器，不留持久容器。
 
 3. 实现 `postgres dump`。
    - CLI 参数为 `--dsn` / `--dsn-env`、`--output` 和 `--compression-level`；严格要求前两者二选一，
@@ -59,9 +63,10 @@ standard 模式不单独创建 Spec；接口和实施决策在本计划中固定
    - 使用 `pg_dump --format=custom --file <sibling-temp-file> --dbname <redacted-uri>`；仅在用户指定时
      加入 native compression level。成功后原子替换为最终 `.dump`，失败后删除临时文件，避免把不完整
      备份伪装成可恢复制品。
-   - `pg_dump` 不在 PATH 时检查 Docker CLI 和 `postgres.client_image` 的本地存在性；使用
-     `docker run --rm --entrypoint pg_dump` 加 bind mount 写入同一个临时输出路径。Docker 不可用、image
-     缺失或命令失败时返回固定、可操作的诊断；不安装客户端、不拉取 image、不重试。
+   - 先探测 mapped container；命中时用 `docker exec` 和容器临时 archive，未命中且 `pg_dump` 不在 PATH
+     时才检查 Docker CLI 和 `postgres.client_image` 的本地存在性；使用 `docker run --rm --entrypoint
+     pg_dump` 加 bind mount 写入同一个临时输出路径。Docker 不可用、image 缺失或命令失败时返回固定、
+     可操作的诊断；不安装客户端、不拉取 image、不重试。
 
 4. 实现 `postgres restore`。
    - CLI 参数为 `--dsn` / `--dsn-env`、`--input`、`--clean`、与 clean 绑定的 `--if-exists`、
@@ -70,14 +75,17 @@ standard 模式不单独创建 Spec；接口和实施决策在本计划中固定
    - 使用 `pg_restore --dbname <redacted-uri> --exit-on-error` 执行恢复；按选项附加 `--clean`、
      `--if-exists`、`--no-owner`、`--no-privileges` 和 `--jobs`。`--if-exists` 未同时启用 clean 时由 CLI
      拒绝。
-   - 默认跳过 owner/ACL；preserve 模式只改变对应 `pg_restore` 选项，不创建缺失 role。本机 `pg_restore`
-     缺失时，以同一个配置 image 运行 `docker run --rm --entrypoint pg_restore`，将 archive bind mount 为
-     只读文件；Docker 环境的 DSN、凭据和 hostname 映射遵循第 2 步。无论成功或失败，
-     CLI 都只输出输入路径和非敏感结果，文档明确说明 restore 可能留下部分恢复状态。
+   - 默认跳过 owner/ACL；preserve 模式只改变对应 `pg_restore` 选项，不创建缺失 role。先探测 mapped
+     container；命中时将 archive 临时复制到该容器，以容器内 `pg_restore --list` 完成预检并用默认 Unix
+     socket 恢复，成功或失败后删除临时 archive。本机无 mapped container 且 `pg_restore` 缺失时，才以
+     同一个配置 image 运行 `docker run --rm --entrypoint pg_restore`，将 archive bind mount 为只读文件；
+     Docker 环境的 DSN、凭据和 hostname 映射遵循第 2 步。无论成功或失败，CLI 都只输出输入路径和非敏感
+     结果，文档明确说明 restore 可能留下部分恢复状态。
 
 5. 补充测试、文档和 Codex skill。
    - 新增 `tests/test_postgres.py`：命令构造、DSN/凭据脱敏、`.pgpass` 转义和清理、默认/显式输出、
-     临时输出原子替换、archive 预检、clean 约束、owner/ACL 策略、jobs 校验及客户端缺失诊断。
+     临时输出原子替换、archive 预检、mapped container 复用、clean 约束、owner/ACL 策略、jobs 校验及
+     客户端缺失诊断。
    - 扩展 `tests/test_settings.py`，覆盖 `postgres` YAML、dotenv 和环境变量覆盖；按需更新 root CLI
      help 的断言。
    - 更新 `README.md`、新建 `docs/postgres.md`、更新 `docs/codex.md` 和插件描述；新增
@@ -138,3 +146,4 @@ standard 模式不单独创建 Spec；接口和实施决策在本计划中固定
 - 用户确认不实现物理备份/还原，并要求优先 PostgreSQL 单库 dump/restore。
 - 用户要求将当前 JSONL PostgreSQL export/import 与 native PostgreSQL backup/restore 保持职责分离。
 - 用户确认 Docker 回退、PostgreSQL 18+ 基线和默认跳过 owner/ACL，并要求开始 Implementation。
+- 用户要求继续历史实现并对齐 MySQL 的本机 Docker PostgreSQL 容器复用规则。

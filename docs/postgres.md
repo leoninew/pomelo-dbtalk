@@ -24,7 +24,11 @@ $env:APP_DSN = 'postgresql+psycopg://backup:password@db.example.com:5432/app?ssl
 libpq URI；本机客户端读取临时 `.pgpass`，Docker client 通过子进程环境读取密码。正常输出、日志和
 错误摘要不会回显密码。
 
-命令优先使用本机 `pg_dump` / `pg_restore`。缺失时，才使用本机 Docker 中已有的配置 image：
+对于 `localhost` 或 `127.0.0.1`，若请求端口唯一对应一个运行中的 Docker PostgreSQL 容器，dump 和
+restore 优先复用该容器：通过 `docker exec` 调用容器内 `pg_dump` / `pg_restore`，使用容器默认 Unix
+socket；dump 的 archive 通过临时文件和 `docker cp` 取回，restore 通过 `docker cp` 放入后导入并清理。
+未识别到唯一映射容器时，才优先使用本机 `pg_dump` / `pg_restore`；本机客户端缺失时使用本机 Docker
+中已有的配置 image：
 
 ```yaml
 postgres:

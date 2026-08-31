@@ -18,6 +18,7 @@ from .client import (
     docker_bind_mount,
     docker_database_host,
     docker_host_gateway_args,
+    docker_mapped_postgres_container,
     docker_password_environment,
     docker_postgres_image,
     ensure_command_succeeded,
@@ -81,17 +82,22 @@ def pg_dump_command_args(
     output: PurePath,
     *,
     docker: bool = False,
+    mapped_container: bool = False,
 ) -> list[str]:
     """Build a password-free ``pg_dump`` command vector."""
 
-    host = docker_database_host(options.connection.host) if docker else None
+    host: str | None
+    if mapped_container:
+        host = ""
+    else:
+        host = docker_database_host(options.connection.host) if docker else None
     args = [
         "pg_dump",
         "--format=custom",
         "--file",
         str(output),
         "--dbname",
-        options.connection.libpq_uri(host=host),
+        options.connection.libpq_uri(host=host, socket=mapped_container),
     ]
     if options.compression_level is not None:
         args.append(f"--compress={options.compression_level}")
@@ -106,7 +112,12 @@ def dump_database(options: PostgresDumpOptions) -> Path:
         raise click.ClickException(f"Dump output directory does not exist: {output.parent}")
     temporary_output = output.parent / f".dbtalk-pgdump-{uuid.uuid4().hex}.dump"
     try:
-        if shutil.which("pg_dump") is not None:
+        container_id = docker_mapped_postgres_container(
+            options.connection.host, options.connection.port
+        )
+        if container_id is not None:
+            _dump_with_mapped_container(options, temporary_output, container_id)
+        elif shutil.which("pg_dump") is not None:
             _dump_with_local_client(options, temporary_output)
         else:
             image, reason = docker_postgres_image(options.client_image)
@@ -126,6 +137,34 @@ def _dump_with_local_client(options: PostgresDumpOptions, output: Path) -> None:
     with pgpass_environment(options.connection) as environment:
         result = run_command(pg_dump_command_args(options, output), environment)
     ensure_command_succeeded(result, "pg_dump")
+
+
+def _dump_with_mapped_container(
+    options: PostgresDumpOptions, output: Path, container_id: str
+) -> None:
+    """Run pg_dump through the mapped database container's Unix socket."""
+
+    container_output = f"/tmp/dbtalk-pgdump-{uuid.uuid4().hex}.dump"
+    environment = docker_password_environment(options.connection)
+    command = [
+        "docker",
+        "exec",
+        "--env",
+        "PGPASSWORD",
+        container_id,
+        *pg_dump_command_args(
+            options,
+            PurePosixPath(container_output),
+            mapped_container=True,
+        ),
+    ]
+    try:
+        ensure_command_succeeded(run_command(command, environment), "Container pg_dump")
+        copy_command = ["docker", "cp", f"{container_id}:{container_output}", str(output)]
+        ensure_command_succeeded(run_command(copy_command, environment), "Container dump copy")
+    finally:
+        with contextlib.suppress(OSError):
+            run_command(["docker", "exec", container_id, "rm", "-f", container_output])
 
 
 def _dump_with_docker(options: PostgresDumpOptions, output: Path, image: str) -> None:

@@ -1,5 +1,5 @@
 # PostgreSQL 单库逻辑备份与还原需求
-最后修改时间: 2026-08-23 10:56:52
+最后修改时间: 2026-08-31 15:52:55
 
 ---
 Review status: Accepted
@@ -32,6 +32,8 @@ Stage: Requirement
    时间戳文件；其他路径视为文件路径且父目录必须存在。
 8. 优先使用本机 PostgreSQL 客户端；本机客户端缺失时，回退到配置指定且本地已存在的 PostgreSQL 18+
    Docker image。不会自动安装客户端或拉取 image。
+9. 当 DSN 指向本机地址且请求端口唯一映射到运行中的 PostgreSQL Docker 容器时，优先复用该容器执行
+   dump/restore，使用容器默认 Unix socket；未识别到唯一映射容器时才按客户端回退规则执行。
 
 ## Non-goal
 
@@ -59,10 +61,13 @@ Stage: Requirement
 
 - [ ] `dbtalk postgres dump` 与 `dbtalk postgres restore` 只接受且必须接受一个 `--dsn DSN` 或
       `--dsn-env NAME`；DSN 必须是明确的 `postgresql+psycopg://` 形式。
-- [ ] dump 优先调用本机 `pg_dump`，以 custom format 写入 `.dump`；默认文件名和 `--output` 目录/文件
-      判定与现有 MySQL dump 一致。
+- [ ] 无本机映射容器时 dump 优先调用本机 `pg_dump`，以 custom format 写入 `.dump`；默认文件名和
+      `--output` 目录/文件判定与现有 MySQL dump 一致。
 - [ ] 本机 `pg_dump` 或 `pg_restore` 缺失时，仅使用配置的、已经存在的 PostgreSQL Docker image 作为
       对应客户端回退；Docker 不可用、image 缺失或回退失败时返回清晰错误并清理临时容器和制品。
+- [ ] 本机 `localhost`/`127.0.0.1` 端口唯一映射到运行中 PostgreSQL 容器时，dump/restore 及 archive
+      预检均通过该容器的 `docker exec` 执行，使用默认 Unix socket；没有唯一映射时才使用本机客户端或
+      临时 Docker client。
 - [ ] Docker fallback 支持配置 PostgreSQL client image，默认使用 PostgreSQL 18 image；用户负责配置与
       源服务端兼容的更高 major image。
 - [ ] custom archive 直接作为 `pg_restore` 输入；不需要也不接受外层 `.gz` 包装。
@@ -97,8 +102,10 @@ Stage: Requirement
 - 目标数据库必须已存在，且由 restore 的 DSN 明确指定。`pg_dump -C` / `pg_restore -C` 会按 archive
   内的源数据库名创建数据库，不能安全地等价为“恢复到 DSN 指定的另一目标库”，故不纳入第一版。
 - `--clean` 是显式的破坏性恢复选项，默认关闭；它清理对象而非删除数据库。
-- Docker fallback 使用配置的本地 PostgreSQL 18+ client image，默认值为 `postgres:18`；本机客户端
-  始终优先。image 不存在时失败而不自动拉取，用户可在配置中设置与源库兼容的更高 major image。
+- 对本机端口唯一映射的运行中 PostgreSQL 容器，复用容器内原生客户端和默认 Unix socket；archive 通过
+  临时文件复制进出容器并在完成后清理。无唯一映射时仍使用本机客户端，再回退到配置 image。
+- Docker fallback 使用配置的本地 PostgreSQL 18+ client image，默认值为 `postgres:18`；无本机映射容器时
+  本机客户端优先。image 不存在时失败而不自动拉取，用户可在配置中设置与源库兼容的更高 major image。
 - restore 默认使用 `--no-owner --no-privileges`，并通过显式 preserve 模式恢复对应 archive 定义。
 - 第一版以 PostgreSQL 18+ 为主流版本基线；不为旧 major 版本设计兼容分支。`pg_dump` client 仍必须
   不低于源服务端 major，恢复目标通常不应低于备份来源。
@@ -127,3 +134,4 @@ Stage: Requirement
   不阻塞计划草拟。
 - 用户确认 Docker 回退，要求基于 PostgreSQL 18+ 的较新版本实现并支持 image 配置；确认 restore 默认
   跳过 owner/ACL；当前 PostgreSQL 使用版本为 18+，不涉及旧 major 兼容。
+- 用户要求按 MySQL 的本机 Docker 容器复用规则修复 PostgreSQL dump/restore。

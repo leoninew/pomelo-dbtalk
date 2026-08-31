@@ -21,6 +21,7 @@ from dbtalk.postgres.client import (
     docker_bind_mount,
     docker_database_host,
     docker_host_gateway_args,
+    docker_mapped_postgres_container,
     docker_postgres_image,
     ensure_command_succeeded,
     escape_pgpass_value,
@@ -72,6 +73,10 @@ def test_connection_builds_a_password_free_libpq_uri() -> None:
     )
     assert "secret" not in native_connection.libpq_uri()
     assert "psycopg" not in native_connection.libpq_uri()
+    assert (
+        native_connection.libpq_uri(host="", socket=True)
+        == "postgresql://backup@/app?sslmode=require"
+    )
 
 
 def test_postgres_connection_rejects_another_database_dialect() -> None:
@@ -205,6 +210,41 @@ def test_dump_uses_the_configured_docker_image_when_local_client_is_missing(
     assert environment["PGPASSWORD"] == "secret"
     assert any("dst=/backup" in value for value in command)
     assert "/backup/" in command[command.index("--file") + 1]
+
+
+def test_dump_reuses_a_mapped_postgres_container_before_other_clients(tmp_path: Path) -> None:
+    output = tmp_path / "backup.dump"
+    options = replace(
+        dump_options(output),
+        connection=replace(connection(), host="localhost", port=5432, database="app"),
+    )
+    calls: list[list[str]] = []
+
+    def capture(command: list[str], *_: object, **__: object) -> CompletedProcess[str]:
+        calls.append(command)
+        if len(command) > 1 and command[1] == "cp":
+            Path(command[-1]).write_bytes(b"PGDMP")
+        return CompletedProcess(command, 0, "", "")
+
+    with (
+        patch(
+            "dbtalk.postgres.dump.docker_mapped_postgres_container",
+            return_value="postgres-server",
+        ) as mapped,
+        patch("dbtalk.postgres.dump.shutil.which", return_value="/usr/bin/pg_dump") as which,
+        patch("dbtalk.postgres.dump.docker_postgres_image") as image,
+        patch("dbtalk.postgres.dump.run_command", side_effect=capture),
+    ):
+        assert dump_database(options) == output.resolve()
+
+    mapped.assert_called_once_with("localhost", 5432)
+    which.assert_not_called()
+    image.assert_not_called()
+    assert calls[0][:5] == ["docker", "exec", "--env", "PGPASSWORD", "postgres-server"]
+    assert "postgresql://backup@/app?sslmode=require" in calls[0]
+    assert "host.docker.internal" not in calls[0]
+    assert calls[1][0:2] == ["docker", "cp"]
+    assert calls[2][:4] == ["docker", "exec", "postgres-server", "rm"]
 
 
 def test_dump_reports_missing_local_and_docker_clients(tmp_path: Path) -> None:
@@ -342,6 +382,59 @@ def test_restore_uses_docker_for_validation_and_restore(tmp_path: Path) -> None:
     assert calls[1][1] is not None
     assert calls[1][1]["PGPASSWORD"] == "secret"
     assert "secret" not in calls[1][0]
+
+
+def test_restore_reuses_a_mapped_postgres_container_for_validation_and_restore(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "backup.dump"
+    input_path.write_bytes(b"PGDMP")
+    options = replace(
+        restore_options(input_path),
+        connection=replace(connection(), host="127.0.0.1", port=5432, database="app"),
+    )
+    calls: list[list[str]] = []
+
+    def capture(command: list[str], *_: object, **__: object) -> CompletedProcess[str]:
+        calls.append(command)
+        return CompletedProcess(command, 0, "", "")
+
+    with (
+        patch(
+            "dbtalk.postgres.restore.docker_mapped_postgres_container",
+            return_value="postgres-server",
+        ) as mapped,
+        patch("dbtalk.postgres.restore.shutil.which", return_value="/usr/bin/pg_restore") as which,
+        patch("dbtalk.postgres.restore.docker_postgres_image") as image,
+        patch("dbtalk.postgres.restore.run_command", side_effect=capture),
+    ):
+        assert restore_database(options) == input_path.resolve()
+
+    mapped.assert_called_once_with("127.0.0.1", 5432)
+    which.assert_not_called()
+    image.assert_not_called()
+    assert calls[0][0:2] == ["docker", "cp"]
+    assert calls[1][:6] == [
+        "docker",
+        "exec",
+        "--env",
+        "PGPASSWORD",
+        "postgres-server",
+        "pg_restore",
+    ]
+    assert "--list" in calls[1]
+    assert "postgresql://backup@/app?sslmode=require" in calls[4]
+    assert "host.docker.internal" not in calls[4]
+    assert calls[5][0:4] == ["docker", "exec", "postgres-server", "rm"]
+
+
+def test_docker_mapped_postgres_container_requires_one_local_running_container() -> None:
+    with patch(
+        "dbtalk.postgres.client.subprocess.run",
+        return_value=CompletedProcess([], 0, "one\ntwo\n", ""),
+    ) as run:
+        assert docker_mapped_postgres_container("localhost", 5432) is None
+    assert run.call_args.args[0][-1] == "publish=5432"
 
 
 def test_restore_reports_an_invalid_custom_archive_before_writing(tmp_path: Path) -> None:

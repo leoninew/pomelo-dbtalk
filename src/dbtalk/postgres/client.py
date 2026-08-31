@@ -50,14 +50,14 @@ class PostgresConnection:
             database=database,
         )
 
-    def libpq_uri(self, *, host: str | None = None) -> str:
+    def libpq_uri(self, *, host: str | None = None, socket: bool = False) -> str:
         """Return a libpq URI with the SQLAlchemy driver and password removed."""
 
         return URL.create(
             drivername="postgresql",
             username=self.user,
-            host=host or self.host,
-            port=self.port,
+            host=self.host if host is None else host,
+            port=None if socket else self.port,
             database=self.database,
             query=self.url.query,
         ).render_as_string(hide_password=False)
@@ -125,6 +125,35 @@ def docker_postgres_image(image: str) -> tuple[str | None, str]:
     if result.returncode != 0:
         return None, f"Configured PostgreSQL Docker image is not available locally: {image}."
     return image, ""
+
+
+def docker_mapped_postgres_container(host: str, port: int) -> str | None:
+    """Return the sole running container that publishes a local PostgreSQL port."""
+
+    if not is_local_postgres_host(host):
+        return None
+    try:
+        listed = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "--quiet",
+                "--filter",
+                "status=running",
+                "--filter",
+                f"publish={port}",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if listed.returncode != 0:
+        return None
+
+    container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+    return container_ids[0] if len(container_ids) == 1 else None
 
 
 def docker_database_host(host: str) -> str:

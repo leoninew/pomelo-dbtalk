@@ -29,8 +29,10 @@ dbtalk postgres database --help
 $env:DBTALK_APP_DSN = 'postgresql+psycopg://backup:password@db.example.com:5432/app'
 ```
 
-优先使用本机 `pg_dump` / `pg_restore`。缺失时，只能使用 `postgres.client_image` 配置的本地 Docker image，
-默认 `postgres:18`；不会安装客户端、拉取 image 或自动重试。必要时通过
+当 DSN 指向本机 `localhost` 或 `127.0.0.1` 且请求端口唯一对应一个运行中的 Docker PostgreSQL 容器时，
+dump/restore 直接复用该容器，通过 `docker exec` 使用容器内默认 Unix socket；dump 通过临时文件和
+`docker cp` 取回 archive，restore 通过 `docker cp` 放入后导入并清理。未识别到唯一映射容器时，才优先
+使用本机 `pg_dump` / `pg_restore`；本机客户端缺失时，只能使用 `postgres.client_image` 配置的本地 Docker image，默认 `postgres:18`；不会安装客户端、拉取 image 或自动重试。必要时通过
 `DBTALK_POSTGRES__CLIENT_IMAGE` 配置与源服务端兼容的更高 major image。
 
 ## Database management
