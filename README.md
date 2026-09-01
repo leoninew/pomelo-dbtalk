@@ -45,6 +45,23 @@ uv run dbtalk query --help
 uv run dbtalk exec --help
 ```
 
+## 版本管理
+
+项目从完整 Git 历史计算 `0.y.z` 版本：提交 subject 以 `feat` 开头时增加 `y` 并将 `z` 重置为
+`0`，其他提交只增加 `z`。仅查看当前计算结果：
+
+```powershell
+make version
+```
+
+应用版本到 `pyproject.toml` 并刷新 `uv.lock`：
+
+```powershell
+make version VERSION_ARGS='--quiet --apply'
+```
+
+`--apply` 会在锁文件刷新失败时恢复两个版本文件；不会创建 Git 提交或推送标签。
+
 ## 配置
 
 默认配置位于 [dbtalk.yaml](dbtalk.yaml)。复制 [.env.example](.env.example) 为 `.env.local`，运行前设置 `DBTALK_ENVKEY=local`，即可加载本地凭据和覆盖项。CLI 选项优先级最高。

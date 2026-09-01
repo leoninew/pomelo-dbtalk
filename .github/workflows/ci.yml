@@ -34,19 +34,13 @@ jobs:
         run: uv lock --check
 
       - name: Install locked dependencies
-        run: uv sync --all-groups --locked
+        run: make deps
 
-      - name: Lint
-        run: uv run --locked --no-sync ruff check .
-
-      - name: Verify formatting
-        run: uv run --locked --no-sync ruff format --check .
-
-      - name: Type check
-        run: uv run --locked --no-sync mypy .
+      - name: Quality checks
+        run: make check
 
       - name: Test
-        run: uv run --locked --no-sync pytest
+        run: make test
 
       - name: Build distributions
-        run: uv build
+        run: make release

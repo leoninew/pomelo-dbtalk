@@ -2,6 +2,7 @@
 
 UV ?= uv
 UV_RUN ?= $(UV) run --locked --no-sync
+VERSION_ARGS ?=
 DOCKER ?= docker
 IMAGE_NAME ?= dbtalk
 IMAGE_TAG ?= latest
@@ -31,7 +32,7 @@ ifneq ($(filter 1 true yes,$(cov)),)
 TEST_COV_ARGS := --cov=dbtalk --cov-report=term-missing:skip-covered --cov-report=html
 endif
 
-.PHONY: help deps install check test release binary release-image
+.PHONY: help deps install check test version release binary release-image
 
 help: ## Show available targets.
 	@echo "Usage: make <target> [IMAGE_NAME=registry/dbtalk] [IMAGE_TAG=1.0.0]"
@@ -41,6 +42,7 @@ help: ## Show available targets.
 	@echo "  install       Install the CLI and synchronize agent plugins"
 	@echo "  check         Run Ruff and Mypy quality checks (fix=1 enables fixes)"
 	@echo "  test          Run unit tests (cov=1 enables coverage reports)"
+	@echo "  version       Calculate or apply the Git-derived project version"
 	@echo "  release       Build source and wheel distributions"
 	@echo "  binary        Build a standalone executable"
 	@echo "  release-image Build the runtime container image"
@@ -55,12 +57,15 @@ install: ## Install the CLI and synchronize agent plugins.
 	$(UV) run --locked python scripts/install.py plugin apply
 
 check: ## Run Ruff and Mypy checks without tests; use fix=1 to fix Ruff issues.
-	$(UV_RUN) ruff format $(RUFF_FORMAT_ARGS) src tests
-	$(UV_RUN) ruff check $(RUFF_CHECK_ARGS) src tests
-	$(UV_RUN) mypy src tests
+	$(UV_RUN) ruff format $(RUFF_FORMAT_ARGS) src tests scripts
+	$(UV_RUN) ruff check $(RUFF_CHECK_ARGS) src tests scripts
+	$(UV_RUN) mypy src tests scripts
 
 test: ## Run unit tests; use cov=1 to collect coverage.
 	$(UV_RUN) pytest $(TEST_COV_ARGS)
+
+version: ## Calculate or apply the Git-derived project version.
+	$(UV_RUN) python scripts/version_calc.py $(VERSION_ARGS)
 
 release: ## Build source and wheel distributions.
 	$(UV) build
