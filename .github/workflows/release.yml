@@ -152,3 +152,4 @@ jobs:
           else
             gh release create "$RELEASE_TAG" dist/*.whl \
               --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          fi
