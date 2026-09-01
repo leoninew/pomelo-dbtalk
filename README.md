@@ -7,13 +7,17 @@ SQLite/MySQL/PostgreSQL 间的 JSONL 数据传输，以及 MySQL 和 PostgreSQL 
 
 | 一级子命令 | 用途 | 手册 |
 | --- | --- | --- |
-| `dbtalk mysql` | 管理 MySQL database、user 与固定 profile 授权，或创建和还原原生 SQL dump。 | [MySQL 手册](docs/mysql.md) |
-| `dbtalk postgres` | 管理 PostgreSQL database、role 与固定 profile 授权，或创建和还原 custom archive。 | [PostgreSQL 手册](docs/postgres.md) |
-| `dbtalk database` | 执行 query/exec，或在既有 SQLite、MySQL、PostgreSQL schema 间通过 JSONL 传输数据。 | [数据库手册](docs/database.md) |
+| `dbtalk mysql` | 管理 MySQL schema、user、权限与原生 SQL dump。 | [MySQL 手册](docs/mysql.md) |
+| `dbtalk postgres` | 管理 PostgreSQL schema、role、权限与 custom archive。 | [PostgreSQL 手册](docs/postgres.md) |
+| `dbtalk query/exec/export/import` | 通用 SQL 操作和 SQLite、MySQL、PostgreSQL 间 JSONL 数据传输。 | [数据库手册](docs/database.md) |
 
 Codex 使用本项目时，参见 [Codex 插件与 Skills](docs/codex.md)。
 
 当前版本不提供 MCP 能力。
+
+常用命令分工：`mysql schema` / `postgres schema` 管理 schema/database；`user` / `role` 管理主体生命周期；
+`grant` / `revoke` 管理 profile 或细粒度权限；`permissions list/show` 查看原生权限；`query`、`exec`、
+`export`、`import` 提供通用 SQL 和 JSONL 数据传输。
 
 ## 安装与运行
 
@@ -28,16 +32,17 @@ uv run dbtalk --help
 
 ```powershell
 uv run dbtalk mysql --help
-uv run dbtalk mysql database --help
+uv run dbtalk mysql schema --help
 uv run dbtalk mysql user --help
 uv run dbtalk mysql grant --help
+uv run dbtalk mysql permissions --help
 uv run dbtalk postgres --help
-uv run dbtalk postgres database --help
+uv run dbtalk postgres schema --help
 uv run dbtalk postgres role --help
 uv run dbtalk postgres grant --help
-uv run dbtalk database --help
-uv run dbtalk database query --help
-uv run dbtalk database exec --help
+uv run dbtalk postgres permissions --help
+uv run dbtalk query --help
+uv run dbtalk exec --help
 ```
 
 ## 配置

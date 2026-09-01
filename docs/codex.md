@@ -18,9 +18,9 @@ uv sync --all-groups
 
 | Skill | 适用任务 | 调用命令 | 参考手册 |
 | --- | --- | --- | --- |
-| [`dbtalk-mysql`](../plugins/dbtalk/skills/dbtalk-mysql/SKILL.md) | MySQL database、user、固定 profile 授权、backup、dump、restore 或导入 `.sql`。 | `dbtalk mysql` | [MySQL 手册](mysql.md) |
-| [`dbtalk-postgres`](../plugins/dbtalk/skills/dbtalk-postgres/SKILL.md) | PostgreSQL database、role、固定 profile 授权、单库逻辑备份或恢复 custom archive。 | `dbtalk postgres` | [PostgreSQL 手册](postgres.md) |
-| [`dbtalk-database`](../plugins/dbtalk/skills/dbtalk-database/SKILL.md) | 通用 query/exec，以及 SQLite、MySQL、PostgreSQL 间 JSONL 导出/导入。 | `dbtalk database` | [数据库手册](database.md) |
+| [`dbtalk-mysql`](../plugins/dbtalk/skills/dbtalk-mysql/SKILL.md) | MySQL schema、user、权限、backup、dump、restore 或导入 `.sql`。 | `dbtalk mysql` | [MySQL 手册](mysql.md) |
+| [`dbtalk-postgres`](../plugins/dbtalk/skills/dbtalk-postgres/SKILL.md) | PostgreSQL schema、role、权限、单库逻辑备份或恢复 custom archive。 | `dbtalk postgres` | [PostgreSQL 手册](postgres.md) |
+| [`dbtalk-database`](../plugins/dbtalk/skills/dbtalk-database/SKILL.md) | 通用 query/exec，以及 SQLite、MySQL、PostgreSQL 间 JSONL 导出/导入。 | `dbtalk query/exec/export/import` | [数据库手册](database.md) |
 
 三个 skill 只在其职责范围内选择命令：原生 MySQL SQL 备份与还原使用 `dbtalk-mysql`；PostgreSQL
 custom archive 使用 `dbtalk-postgres`；通用 SQL 操作和跨库数据传输使用 `dbtalk-database`。它们不会
@@ -36,7 +36,7 @@ skills 会先通过相应的 `--help` 确认可用参数，并复用 CLI 的安�
 `dbtalk-postgres` 对本机 DSN 的唯一端口映射容器优先复用其 `docker exec` 和默认 Unix socket；未识别到
 唯一映射容器时使用本机 `pg_dump` / `pg_restore`，缺失时只使用配置的本地 PostgreSQL Docker image
 （默认 `postgres:18`）；不会拉取 image。它只处理 custom archive，不等同于 PostgreSQL 的物理备份或
-JSONL 数据传输。`dbtalk-postgres database` 独立处理 PostgreSQL database 生命周期，不调用
+JSONL 数据传输。`dbtalk-postgres schema` 独立处理 PostgreSQL database 生命周期，不调用
 `pg_dump` / `pg_restore`。
 
 两个方言的 user/role、grant/revoke 命令均使用管理 DSN 和结构化参数，不接收原始 SQL。密码仅可通过

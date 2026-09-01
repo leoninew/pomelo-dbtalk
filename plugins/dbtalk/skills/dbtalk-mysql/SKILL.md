@@ -1,11 +1,11 @@
 ---
 name: dbtalk-mysql
-description: 使用 dbtalk mysql 管理 MySQL database、user、固定 profile 授权，或导出和恢复 mysqldump SQL 文件。用户要求 MySQL database create/drop/list、用户、授权、backup、dump、restore 或导入 .sql 时使用。
+description: 使用 dbtalk mysql 管理 MySQL schema/database、user、profile 授权，或导出和恢复 mysqldump SQL 文件。用户要求 MySQL schema/database create/drop/list、用户、授权、backup、dump、restore 或导入 .sql 时使用。
 ---
 
 # dbtalk MySQL
 
-使用 `dbtalk mysql` 管理 MySQL database、user、固定 profile 授权，或处理原生 SQL dump 和 restore。要求发布安装的 `dbtalk` 可执行文件位于 `PATH` 中。
+使用 `dbtalk mysql` 管理 MySQL schema/database、user、profile 授权，或处理原生 SQL dump 和 restore。要求发布安装的 `dbtalk` 可执行文件位于 `PATH` 中。
 
 ## Dump 执行语义
 
@@ -25,12 +25,12 @@ DBTALK_APP_DSN=mysql+pymysql://user:password@host:3306/database
 
 ## Database management
 
-数据库生命周期操作使用 `dbtalk mysql database`，与 query/exec、账号管理和 dump/restore 分离。管理 DSN 必须指向一个已有 MySQL 数据库，并使用具有相应数据库管理权限的账号。
+数据库生命周期操作使用 `dbtalk mysql schema`，与 query/exec、账号管理和 dump/restore 分离。管理 DSN 必须指向一个已有 MySQL 数据库，并使用具有相应数据库管理权限的账号。
 
 ```powershell
-dbtalk mysql database list --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN
-dbtalk mysql database create --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN --name app_db
-dbtalk mysql database drop --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN --name app_db --yes
+dbtalk mysql schema list --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN
+dbtalk mysql schema create --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN --name app_db
+dbtalk mysql schema drop --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN --name app_db --yes
 ```
 
 先执行 `list` 核对目标。创建后只报告数据库名。删除不可逆，只有用户明确授权删除指定目标时才传入 `--yes`；不猜测目标、不执行任意 SQL、不创建或管理账号。
@@ -39,7 +39,7 @@ dbtalk mysql database drop --dsn-env DBTALK_MYSQL_MANAGEMENT_DSN --name app_db -
 
 dump 需要完整的 MySQL DSN。未传 `--output` 时，输出默认为当前目录的 `data/<database>-<timestamp>.sql`，并会自动创建配置的输出目录。显式传入 `--output` 且路径是已有目录时，也会在其中生成同样的时间戳文件。其他路径视为文件，父目录必须已存在；不存在的路径不会被推断为目录或自动创建。
 
-`dump` 是 MySQL 原生 SQL 备份入口；不要用 `dbtalk database export` 代替它。只有用户同时要求 JSONL 数据导出时，才额外运行 `dbtalk database export`。
+`dump` 是 MySQL 原生 SQL 备份入口；不要用 `dbtalk export` 代替它。只有用户同时要求 JSONL 数据导出时，才额外运行 `dbtalk export`。
 
 ```powershell
 dbtalk mysql dump --dsn-env DBTALK_APP_DSN --output .\data\app.sql
@@ -78,8 +78,10 @@ restore 会覆盖或删除 dump 中同名表及数据，不能整体回滚。完
 ```powershell
 dbtalk mysql user --help
 dbtalk mysql grant --help
+dbtalk mysql revoke --help
+dbtalk mysql permissions --help
 ```
 
 user 管理和 grant/revoke 需要完整管理 DSN。密码只能通过 `--password-env NAME` 引用，不得作为 CLI 值或输出内容。MySQL user 必须提供精确的 `--user` 和 `--host`；允许 `localhost`、单个 DNS 名称、IPv4、IPv6，以及字面量 `%` 账号 host。`%` 仅表示数据库中已存在的精确 `user@%` 账号，不得扩展为其他模式；仍不允许包含 `_` 或部分通配符的 host。
 
-grant/revoke 仅支持单个 `--database` 与 `read-only` / `read-write` profile。执行启用、禁用、轮换密码、删除、授权或撤销前，必须确认目标、资源、profile 和写入权限，并传入 `--yes`。轮换密码可针对当前管理账号，但必须有用户明确授权；其他账号管理操作不得修改当前管理 account。不要用这些命令传入原始 `GRANT`/`REVOKE` SQL，也不要扩大到全局、表级或任意 privilege。
+grant/revoke 支持 `read-only`、`ddl`、`read-write`、`dml` profile，或可重复的 `--privilege NAME`；两者互斥。权限层级为 `dml > read-write > ddl > read-only`，其中 `read-write` 包含 `ddl` 和常规 DML，但不包含建库能力，`dml` 才增加建库所需权限。`--database` 可省略，默认使用 DSN database。执行启用、禁用、轮换密码、删除、授权或撤销前，必须确认目标、资源、profile/privilege 和写入权限，并传入 `--yes`。`permissions list/show` 可查看当前 DSN 可见的原生授权，并支持主体和 database 筛选。不要传入完整 SQL；细粒度 privilege 由 MySQL 服务端决定是否允许。

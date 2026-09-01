@@ -1,11 +1,11 @@
 ---
 name: dbtalk-postgres
-description: 使用 dbtalk postgres 管理 PostgreSQL database、role、固定 profile 授权，或创建和恢复单库 custom archive。用户要求 PostgreSQL database create/drop/list、role、授权、backup、dump、restore 时使用。
+description: 使用 dbtalk postgres 管理 PostgreSQL schema/database、role、profile 授权，或创建和恢复单库 custom archive。用户要求 PostgreSQL schema/database create/drop/list、role、授权、backup、dump、restore 时使用。
 ---
 
 # dbtalk PostgreSQL
 
-使用 `dbtalk postgres` 管理 PostgreSQL database、role、固定 profile 授权，或处理单个数据库的 native logical
+使用 `dbtalk postgres` 管理 PostgreSQL schema/database、role、profile 授权，或处理单个数据库的 native logical
 dump 和 restore。它创建并消费 `pg_dump --format=custom` archive，不用于 JSONL 数据传输、物理备份、WAL/PITR
 或 tablespace。要求发布安装的 `dbtalk` 可执行文件位于 `PATH` 中。
 
@@ -14,7 +14,7 @@ dump 和 restore。它创建并消费 `pg_dump --format=custom` archive，不用
 ```powershell
 dbtalk postgres dump --help
 dbtalk postgres restore --help
-dbtalk postgres database --help
+dbtalk postgres schema --help
 ```
 
 ## 连接与客户端
@@ -37,13 +37,13 @@ dump/restore 直接复用该容器，通过 `docker exec` 使用容器内默认 
 
 ## Database management
 
-数据库生命周期操作使用 `dbtalk postgres database`，与 query/exec、role 管理和 dump/restore 分离。管理
+数据库生命周期操作使用 `dbtalk postgres schema`，与 query/exec、role 管理和 dump/restore 分离。管理
 DSN 必须连接到目标以外的维护库，通常为 `postgres`，并使用具有建库或删库权限的账号。
 
 ```powershell
-dbtalk postgres database list --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN
-dbtalk postgres database create --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN --name app_db
-dbtalk postgres database drop --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN --name app_db --yes
+dbtalk postgres schema list --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN
+dbtalk postgres schema create --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN --name app_db
+dbtalk postgres schema drop --dsn-env DBTALK_POSTGRES_MANAGEMENT_DSN --name app_db --yes
 ```
 
 先执行 `list` 核对目标。删除不可逆，只有用户明确授权删除指定目标时才传入 `--yes`；不能删除管理 DSN
@@ -82,11 +82,14 @@ restore 在写入前用 `pg_restore --list` 校验 archive。即使启用 fail-f
 ```powershell
 dbtalk postgres role --help
 dbtalk postgres grant --help
+dbtalk postgres revoke --help
+dbtalk postgres permissions --help
 ```
 
 role 管理和 grant/revoke 使用管理 DSN。新 role 默认没有超级用户、建库、建 role、复制或绕过 RLS 能力；
-密码只能通过 `--password-env NAME` 引用。grant/revoke 只接受 `--database` 或 `--schema` 之一，以及固定的
-`read-only` / `read-write` profile；不接受 table、sequence、function、role membership 或原始权限 SQL。
+密码只能通过 `--password-env NAME` 引用。grant/revoke 的 `--database` 与 `--schema` 最多提供一个，省略时使用 DSN database；支持 `read-only`、`ddl`、`read-write`、`dml` profile，或可重复的 `--privilege NAME`，两者互斥。权限层级为 `dml > read-write > ddl > read-only`，`read-write` 包含 `ddl` 和常规 DML 但不含 `CREATEDB`，`dml` 才切换 role 的 `CREATEDB` 属性。细粒度 privilege 不由 dbtalk allowlist 过滤，是否可授权由 PostgreSQL 服务端决定。
+
+`permissions list/show` 使用 PostgreSQL 原生权限查询；list 默认显示当前 DSN 可见结果，并支持 role、database、schema 筛选，show 要求 role 并支持资源筛选。
 
 schema profile 仅作用于当前对象，不能替代 default privileges。执行启用、禁用、轮换密码、删除、授权或撤销前，
 必须确认目标和写入授权，并传入 `--yes`。不要修改当前管理 role，也不要把 profile 扩展为 `WITH GRANT OPTION`

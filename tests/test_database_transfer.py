@@ -59,7 +59,6 @@ class DatabaseTransferTests(unittest.TestCase):
             exported = runner.invoke(
                 main,
                 [
-                    "database",
                     "export",
                     "--source",
                     "sqlite",
@@ -74,7 +73,6 @@ class DatabaseTransferTests(unittest.TestCase):
             imported = runner.invoke(
                 main,
                 [
-                    "database",
                     "import",
                     "--target",
                     "sqlite",
@@ -730,7 +728,6 @@ class DatabaseTransferTests(unittest.TestCase):
             result = CliRunner().invoke(
                 main,
                 [
-                    "database",
                     "export",
                     "--source",
                     "mysql",
@@ -798,7 +795,6 @@ class DatabaseTransferTests(unittest.TestCase):
         result = CliRunner().invoke(
             main,
             [
-                "database",
                 "export",
                 "--source",
                 "mysql",
@@ -834,7 +830,6 @@ class DatabaseTransferTests(unittest.TestCase):
             exported = runner.invoke(
                 main,
                 [
-                    "database",
                     "export",
                     "--source",
                     "sqlite",
@@ -847,7 +842,6 @@ class DatabaseTransferTests(unittest.TestCase):
             imported = runner.invoke(
                 main,
                 [
-                    "database",
                     "import",
                     "--target",
                     "sqlite",
@@ -884,7 +878,6 @@ class DatabaseTransferTests(unittest.TestCase):
                 default_export = runner.invoke(
                     main,
                     [
-                        "database",
                         "export",
                         "--source",
                         "sqlite",
@@ -897,7 +890,6 @@ class DatabaseTransferTests(unittest.TestCase):
                 directory_export = runner.invoke(
                     main,
                     [
-                        "database",
                         "export",
                         "--source",
                         "sqlite",

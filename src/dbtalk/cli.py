@@ -5,8 +5,9 @@ from __future__ import annotations
 import click
 
 from dbtalk import __version__
-from dbtalk.commands import database, mysql, postgres
+from dbtalk.commands import mysql, postgres
 from dbtalk.context import DbtalkContext
+from dbtalk.database.cli import database as database_operations
 from dbtalk.logging_config import configure_logging
 from dbtalk.settings import load_settings
 
@@ -35,7 +36,8 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 
 cli.add_command(mysql)
 cli.add_command(postgres)
-cli.add_command(database)
+for _name, _command in database_operations.commands.items():
+    cli.add_command(_command, name=_name)
 
 
 def main() -> None:

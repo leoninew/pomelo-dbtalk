@@ -1,13 +1,13 @@
 ---
 name: dbtalk-database
-description: 使用 dbtalk database 通过明确 DSN 执行通用 SQL 查询、写入及 JSONL 数据导入导出。
+description: 使用 dbtalk query/exec/export/import 通过明确 DSN 执行通用 SQL 及 JSONL 数据导入导出。
 ---
 
-# dbtalk Database
+# dbtalk Database Operations
 
 要求发布安装的 `dbtalk` 可执行文件位于 `PATH` 中。
 
-所有 `dbtalk database` 命令都必须接收一个完整 DSN，或接收 `--dsn-env NAME` 从环境变量读取 DSN；二者不能同时
+所有 `dbtalk query`、`dbtalk exec`、`dbtalk export` 和 `dbtalk import` 命令都必须接收一个完整 DSN，或接收 `--dsn-env NAME` 从环境变量读取 DSN；二者不能同时
 提供，也不能省略。不要使用 `sqlite-file`、`--sqlite-path`、`--mysql-dsn-env` 或无 driver 的 DSN。
 对于 `--dsn-env DBTALK_*`，dbtalk 先使用同名进程环境变量；变量不存在时才从当前目录 `.env` 读取同名值。
 非 `DBTALK_*` 名称仅从进程环境读取。
@@ -30,7 +30,7 @@ postgresql+psycopg://user:password@host:5432/database
 ## Query / Exec
 
 ```powershell
-dbtalk database query `
+dbtalk query `
   --dsn 'sqlite:///./data/app.db' `
   --timeout 30 `
   --sql 'SELECT id, name FROM users WHERE id = :id' `
@@ -38,7 +38,7 @@ dbtalk database query `
   --format json
 
 $env:DBTALK_APP_DSN = 'sqlite:///./data/app.db'
-dbtalk database exec `
+dbtalk exec `
   --write `
   --dsn-env DBTALK_APP_DSN `
   --timeout 30 `
@@ -61,12 +61,12 @@ MySQL 分别使用其原生会话或驱动机制。MySQL 写入超时后不保�
 
 ```powershell
 $env:DBTALK_SOURCE_DSN = 'postgresql+psycopg://user:password@host:5432/source_db'
-dbtalk database export `
+dbtalk export `
   --source postgresql `
   --dsn-env DBTALK_SOURCE_DSN `
   --output .\data\source.jsonl
 
-dbtalk database import `
+dbtalk import `
   --target postgresql `
   --dsn 'postgresql+psycopg://user:password@host:5432/target_db' `
   --input .\data\source.jsonl `

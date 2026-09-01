@@ -541,7 +541,6 @@ def test_query_and_exec_cli_use_dsn_environment(
     query = runner.invoke(
         cli,
         [
-            "database",
             "query",
             "--dsn-env",
             "DBTALK_QUERY_DSN",
@@ -559,7 +558,6 @@ def test_query_and_exec_cli_use_dsn_environment(
     direct_query = runner.invoke(
         cli,
         [
-            "database",
             "query",
             "--dsn",
             f"sqlite:///{path.as_posix()}",
@@ -575,7 +573,6 @@ def test_query_and_exec_cli_use_dsn_environment(
     execution = runner.invoke(
         cli,
         [
-            "database",
             "exec",
             "--write",
             "--dsn-env",
@@ -601,7 +598,6 @@ def test_query_and_exec_cli_require_explicit_write_and_support_timeouts(tmp_path
     missing_write = runner.invoke(
         cli,
         [
-            "database",
             "exec",
             "--dsn",
             dsn,
@@ -615,7 +611,6 @@ def test_query_and_exec_cli_require_explicit_write_and_support_timeouts(tmp_path
     read_only_exec = runner.invoke(
         cli,
         [
-            "database",
             "exec",
             "--dsn",
             dsn,
@@ -628,7 +623,6 @@ def test_query_and_exec_cli_require_explicit_write_and_support_timeouts(tmp_path
     query_write = runner.invoke(
         cli,
         [
-            "database",
             "query",
             "--dsn",
             dsn,
@@ -644,7 +638,6 @@ def test_query_and_exec_cli_require_explicit_write_and_support_timeouts(tmp_path
     execution = runner.invoke(
         cli,
         [
-            "database",
             "exec",
             "-w",
             "--dsn",
@@ -661,7 +654,6 @@ def test_query_and_exec_cli_require_explicit_write_and_support_timeouts(tmp_path
     invalid_timeout = runner.invoke(
         cli,
         [
-            "database",
             "query",
             "--dsn",
             dsn,

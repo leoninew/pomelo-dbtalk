@@ -16,12 +16,12 @@ from dbtalk.database.models import DatabaseOperationError
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
-@click.group("database", context_settings=CONTEXT_SETTINGS)
-def database() -> None:
-    """Manage MySQL databases."""
+@click.group("schema", context_settings=CONTEXT_SETTINGS)
+def schema() -> None:
+    """Manage MySQL schemas and databases."""
 
 
-@database.command("list", context_settings=CONTEXT_SETTINGS)
+@schema.command("list", context_settings=CONTEXT_SETTINGS)
 @click.option("--dsn", "dsn_value", help="Complete MySQL SQLAlchemy-style DSN.")
 @click.option("--dsn-env", help="Environment variable containing the MySQL DSN.")
 def list_command(dsn_value: str | None, dsn_env: str | None) -> None:
@@ -35,7 +35,7 @@ def list_command(dsn_value: str | None, dsn_env: str | None) -> None:
         raise click.ClickException(str(error)) from error
 
 
-@database.command("create", context_settings=CONTEXT_SETTINGS)
+@schema.command("create", context_settings=CONTEXT_SETTINGS)
 @click.option("--dsn", "dsn_value", help="Complete MySQL SQLAlchemy-style DSN.")
 @click.option("--dsn-env", help="Environment variable containing the MySQL DSN.")
 @click.option("--name", required=True, help="Database name.")
@@ -49,7 +49,7 @@ def create_command(dsn_value: str | None, dsn_env: str | None, name: str) -> Non
     click.echo(f"Database created: {name}")
 
 
-@database.command("drop", context_settings=CONTEXT_SETTINGS)
+@schema.command("drop", context_settings=CONTEXT_SETTINGS)
 @click.option("--dsn", "dsn_value", help="Complete MySQL SQLAlchemy-style DSN.")
 @click.option("--dsn-env", help="Environment variable containing the MySQL DSN.")
 @click.option("--name", required=True, help="Database name.")
@@ -154,8 +154,10 @@ def _render_database_names(names: tuple[str, ...]) -> str:
 
 __all__ = [
     "create_database",
-    "database",
+    "schema",
     "drop_database",
     "list_databases",
     "resolve_management_dsn",
 ]
+
+database = schema

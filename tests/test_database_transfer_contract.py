@@ -15,15 +15,15 @@ from dbtalk.database.transfer import (
 
 
 class DatabaseTransferContractTests(unittest.TestCase):
-    def test_database_help_exposes_jsonl_commands(self) -> None:
-        result = CliRunner().invoke(main, ["database", "--help"])
+    def test_root_help_exposes_jsonl_commands(self) -> None:
+        result = CliRunner().invoke(main, ["--help"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("export", result.output)
         self.assertIn("import", result.output)
 
     def test_export_help_exposes_connection_and_timezone_options(self) -> None:
-        result = CliRunner().invoke(main, ["database", "export", "--help"])
+        result = CliRunner().invoke(main, ["export", "--help"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("--dsn", result.output)
@@ -33,7 +33,7 @@ class DatabaseTransferContractTests(unittest.TestCase):
         self.assertIn("--exclude-table", result.output)
 
     def test_import_help_exposes_strict_insert_and_upsert_modes(self) -> None:
-        result = CliRunner().invoke(main, ["database", "import", "--help"])
+        result = CliRunner().invoke(main, ["import", "--help"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("insert", result.output)

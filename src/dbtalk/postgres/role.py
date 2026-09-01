@@ -1,4 +1,4 @@
-"""PostgreSQL role lifecycle and fixed-profile authorization commands."""
+"""PostgreSQL role lifecycle and profile/privilege authorization commands."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from dbtalk.database.dsn import ParsedDsn, dsn_from_environment, parse_dsn
 from dbtalk.database.models import DatabaseOperationError
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
-Profile = Literal["read-only", "read-write"]
+Profile = Literal["read-only", "ddl", "read-write", "dml"]
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}$")
 _ENVIRONMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -164,13 +164,29 @@ def drop_command(
 @click.option("--dsn", "dsn_value", help="Complete PostgreSQL SQLAlchemy-style DSN.")
 @click.option("--dsn-env", help="Environment variable containing the PostgreSQL DSN.")
 @click.option("--role", "role_name", required=True, help="PostgreSQL role name.")
-@click.option("--database", "database_name", help="PostgreSQL database authorization target.")
-@click.option("--schema", "schema_name", help="PostgreSQL schema authorization target.")
+@click.option(
+    "--database",
+    "database_name",
+    help="PostgreSQL database authorization target. Defaults to the DSN database.",
+)
+@click.option(
+    "--schema",
+    "schema_name",
+    help="PostgreSQL schema authorization target. Defaults to the DSN database.",
+)
 @click.option(
     "--profile",
-    type=click.Choice(("read-only", "read-write"), case_sensitive=True),
-    required=True,
-    help="Fixed authorization profile.",
+    type=click.Choice(("read-only", "ddl", "read-write", "dml"), case_sensitive=True),
+    help="Fixed authorization profile. Mutually exclusive with --privilege.",
+)
+@click.option(
+    "--privilege",
+    "privileges",
+    multiple=True,
+    help=(
+        "One native privilege name. Repeat for multiple privileges; mutually exclusive "
+        "with --profile."
+    ),
 )
 @click.option("--yes", is_flag=True, help="Confirm granting privileges.")
 def grant_command(
@@ -179,21 +195,29 @@ def grant_command(
     role_name: str,
     database_name: str | None,
     schema_name: str | None,
-    profile: str,
+    profile: str | None,
+    privileges: tuple[str, ...],
     yes: bool,
 ) -> None:
-    """Grant one fixed PostgreSQL profile."""
+    """Grant one PostgreSQL profile or native privilege set."""
 
     _require_yes(yes, "grant PostgreSQL privileges")
     try:
-        resource = _resource(database_name, schema_name)
-        grant_profile(
-            resolve_management_dsn(dsn_value, dsn_env), role_name, resource, _profile(profile)
-        )
+        parsed = resolve_management_dsn(dsn_value, dsn_env)
+        resource = _resource(database_name, schema_name, parsed)
+        if profile is not None and privileges:
+            raise DatabaseOperationError("--profile and --privilege are mutually exclusive")
+        if profile is None and not privileges:
+            raise DatabaseOperationError("provide --profile or at least one --privilege")
+        if profile is not None:
+            grant_profile(parsed, role_name, resource, _profile(profile))
+        else:
+            grant_privileges(parsed, role_name, resource, privileges)
     except DatabaseOperationError as error:
         raise click.ClickException(str(error)) from error
     click.echo(
-        f"PostgreSQL profile granted: {profile} on {resource[0]} {resource[1]} to {role_name}"
+        f"PostgreSQL {'profile ' + profile if profile else 'privileges ' + ', '.join(privileges)} "
+        f"granted on {resource[0]} {resource[1]} to {role_name}"
     )
 
 
@@ -201,13 +225,29 @@ def grant_command(
 @click.option("--dsn", "dsn_value", help="Complete PostgreSQL SQLAlchemy-style DSN.")
 @click.option("--dsn-env", help="Environment variable containing the PostgreSQL DSN.")
 @click.option("--role", "role_name", required=True, help="PostgreSQL role name.")
-@click.option("--database", "database_name", help="PostgreSQL database authorization target.")
-@click.option("--schema", "schema_name", help="PostgreSQL schema authorization target.")
+@click.option(
+    "--database",
+    "database_name",
+    help="PostgreSQL database authorization target. Defaults to the DSN database.",
+)
+@click.option(
+    "--schema",
+    "schema_name",
+    help="PostgreSQL schema authorization target. Defaults to the DSN database.",
+)
 @click.option(
     "--profile",
-    type=click.Choice(("read-only", "read-write"), case_sensitive=True),
-    required=True,
-    help="Fixed authorization profile.",
+    type=click.Choice(("read-only", "ddl", "read-write", "dml"), case_sensitive=True),
+    help="Fixed authorization profile. Mutually exclusive with --privilege.",
+)
+@click.option(
+    "--privilege",
+    "privileges",
+    multiple=True,
+    help=(
+        "One native privilege name. Repeat for multiple privileges; mutually exclusive "
+        "with --profile."
+    ),
 )
 @click.option("--yes", is_flag=True, help="Confirm revoking privileges.")
 def revoke_command(
@@ -216,21 +256,29 @@ def revoke_command(
     role_name: str,
     database_name: str | None,
     schema_name: str | None,
-    profile: str,
+    profile: str | None,
+    privileges: tuple[str, ...],
     yes: bool,
 ) -> None:
-    """Revoke one fixed PostgreSQL profile."""
+    """Revoke one PostgreSQL profile or native privilege set."""
 
     _require_yes(yes, "revoke PostgreSQL privileges")
     try:
-        resource = _resource(database_name, schema_name)
-        revoke_profile(
-            resolve_management_dsn(dsn_value, dsn_env), role_name, resource, _profile(profile)
-        )
+        parsed = resolve_management_dsn(dsn_value, dsn_env)
+        resource = _resource(database_name, schema_name, parsed)
+        if profile is not None and privileges:
+            raise DatabaseOperationError("--profile and --privilege are mutually exclusive")
+        if profile is None and not privileges:
+            raise DatabaseOperationError("provide --profile or at least one --privilege")
+        if profile is not None:
+            revoke_profile(parsed, role_name, resource, _profile(profile))
+        else:
+            revoke_privileges(parsed, role_name, resource, privileges)
     except DatabaseOperationError as error:
         raise click.ClickException(str(error)) from error
     click.echo(
-        f"PostgreSQL profile revoked: {profile} on {resource[0]} {resource[1]} from {role_name}"
+        f"PostgreSQL {'profile ' + profile if profile else 'privileges ' + ', '.join(privileges)} "
+        f"revoked on {resource[0]} {resource[1]} from {role_name}"
     )
 
 
@@ -341,6 +389,24 @@ def revoke_profile(
     _change_profile(parsed, role_name, resource, profile, action="REVOKE")
 
 
+def grant_privileges(
+    parsed: ParsedDsn,
+    role_name: str,
+    resource: tuple[str, str],
+    privileges: tuple[str, ...],
+) -> None:
+    _change_privileges(parsed, role_name, resource, privileges, action="GRANT")
+
+
+def revoke_privileges(
+    parsed: ParsedDsn,
+    role_name: str,
+    resource: tuple[str, str],
+    privileges: tuple[str, ...],
+) -> None:
+    _change_privileges(parsed, role_name, resource, privileges, action="REVOKE")
+
+
 def _alter_role(parsed: ParsedDsn, role_name: str, action: Literal["LOGIN", "NOLOGIN"]) -> None:
     _validate_management_dsn(parsed)
     _validate_identifier(role_name, "PostgreSQL role name")
@@ -364,6 +430,7 @@ def _change_profile(
 ) -> None:
     _validate_management_dsn(parsed)
     _validate_identifier(role_name, "PostgreSQL role name")
+    profile = _profile(profile)
     resource_type, resource_name = resource
     _validate_identifier(resource_name, f"PostgreSQL {resource_type} name")
 
@@ -375,6 +442,39 @@ def _change_profile(
             resource_type, quoted_resource, quoted_role, profile, action
         ):
             connection.exec_driver_sql(statement)
+        if profile == "dml":
+            connection.exec_driver_sql(
+                f"ALTER ROLE {quoted_role} {'CREATEDB' if action == 'GRANT' else 'NOCREATEDB'}"
+            )
+
+    _run_management_operation(parsed, operation)
+
+
+def _change_privileges(
+    parsed: ParsedDsn,
+    role_name: str,
+    resource: tuple[str, str],
+    privileges: tuple[str, ...],
+    *,
+    action: Literal["GRANT", "REVOKE"],
+) -> None:
+    _validate_management_dsn(parsed)
+    _validate_identifier(role_name, "PostgreSQL role name")
+    if not privileges:
+        raise DatabaseOperationError("at least one privilege is required")
+    resource_type, resource_name = resource
+    _validate_identifier(resource_name, f"PostgreSQL {resource_type} name")
+    normalized = tuple(_normalize_privilege(value) for value in privileges)
+
+    def operation(connection: Connection) -> None:
+        _reject_current_role(connection, role_name)
+        quoted_role = _quote_identifier(connection, role_name)
+        quoted_resource = _quote_identifier(connection, resource_name)
+        direction = f"TO {quoted_role}" if action == "GRANT" else f"FROM {quoted_role}"
+        object_type = "DATABASE" if resource_type == "database" else "SCHEMA"
+        connection.exec_driver_sql(
+            f"{action} {', '.join(normalized)} ON {object_type} {quoted_resource} {direction}"
+        )
 
     _run_management_operation(parsed, operation)
 
@@ -388,14 +488,21 @@ def _profile_statements(
 ) -> tuple[str, ...]:
     direction = f"TO {quoted_role}" if action == "GRANT" else f"FROM {quoted_role}"
     if resource_type == "database":
-        privileges = "CONNECT" if profile == "read-only" else "CONNECT, TEMPORARY"
+        privileges = {
+            "read-only": "CONNECT",
+            "ddl": "CONNECT, CREATE",
+            "read-write": "CONNECT, CREATE, TEMPORARY",
+            "dml": "CONNECT, CREATE, TEMPORARY",
+        }[profile]
         return (f"{action} {privileges} ON DATABASE {quoted_resource} {direction}",)
     if resource_type != "schema":
         raise DatabaseOperationError("PostgreSQL authorization resource is invalid")
     statements = [f"{action} USAGE ON SCHEMA {quoted_resource} {direction}"]
-    if profile == "read-only":
+    if profile in {"ddl", "read-write", "dml"}:
+        statements.append(f"{action} CREATE ON SCHEMA {quoted_resource} {direction}")
+    if profile in {"read-only", "ddl"}:
         statements.append(f"{action} SELECT ON ALL TABLES IN SCHEMA {quoted_resource} {direction}")
-    else:
+    elif profile in {"read-write", "dml"}:
         statements.append(
             f"{action} SELECT, INSERT, UPDATE, DELETE ON ALL TABLES "
             f"IN SCHEMA {quoted_resource} {direction}"
@@ -450,9 +557,17 @@ def _password_from_environment(environment_name: str) -> str:
     return password
 
 
-def _resource(database_name: str | None, schema_name: str | None) -> tuple[str, str]:
-    if (database_name is None) == (schema_name is None):
-        raise DatabaseOperationError("provide exactly one of --database or --schema")
+def _resource(
+    database_name: str | None,
+    schema_name: str | None,
+    parsed: ParsedDsn,
+) -> tuple[str, str]:
+    if database_name is not None and schema_name is not None:
+        raise DatabaseOperationError("provide at most one of --database or --schema")
+    if database_name is None and schema_name is None:
+        if parsed.database is None:
+            raise DatabaseOperationError("database or schema resource is required")
+        return "database", parsed.database
     return (
         ("database", database_name) if database_name is not None else ("schema", schema_name or "")
     )
@@ -465,11 +580,19 @@ def _reject_current_role(connection: Connection, role_name: str) -> None:
 
 
 def _profile(profile: str) -> Profile:
-    if profile == "read-only":
-        return "read-only"
-    if profile == "read-write":
-        return "read-write"
+    if profile in {"read-only", "ddl", "read-write", "dml"}:
+        return profile  # type: ignore[return-value]
     raise DatabaseOperationError("authorization profile is invalid")
+
+
+def _normalize_privilege(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or value != value.strip()
+        or not re.fullmatch(r"[A-Za-z][A-Za-z0-9 _]*", value)
+    ):
+        raise DatabaseOperationError("privilege name is invalid")
+    return value.upper()
 
 
 def _quote_identifier(connection: Connection, value: str) -> str:
@@ -511,10 +634,12 @@ __all__ = [
     "drop_role",
     "enable_role",
     "grant_command",
+    "grant_privileges",
     "grant_profile",
     "list_roles",
     "resolve_management_dsn",
     "revoke_command",
+    "revoke_privileges",
     "revoke_profile",
     "role",
     "rotate_role_password",

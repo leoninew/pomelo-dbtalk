@@ -7,6 +7,7 @@ import subprocess
 import sys
 from argparse import Namespace
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -14,7 +15,7 @@ import pytest
 SCRIPT = Path(__file__).parents[1] / "scripts" / "backup_databases.py"
 SPEC = importlib.util.spec_from_file_location("backup_databases_script", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
-backup_databases = importlib.util.module_from_spec(SPEC)
+backup_databases: Any = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = backup_databases
 SPEC.loader.exec_module(backup_databases)
 
@@ -206,9 +207,7 @@ def test_run_dsn_test_uses_read_only_database_query(caplog: pytest.LogCaptureFix
         patch.object(backup_databases.subprocess, "run", return_value=completed) as run,
         caplog.at_level(logging.INFO),
     ):
-        assert backup_databases.run_dsn_test(
-            "dbtalk", "sqlite:///app", 7
-        ) is True
+        assert backup_databases.run_dsn_test("dbtalk", "sqlite:///app", 7) is True
 
     command = run.call_args.args[0]
     assert command == [
@@ -230,9 +229,7 @@ def test_run_dsn_test_uses_read_only_database_query(caplog: pytest.LogCaptureFix
     assert "dbtalk command=dbtalk database query --dsn-env DBTALK_BACKUP_DSN" in caplog.text
 
 
-def test_run_dump_logs_the_dbtalk_command(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_run_dump_logs_the_dbtalk_command(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     destination = tmp_path / "backup.sql.gz"
     target = backup_databases.BackupTarget(
         engine="mysql",
@@ -333,12 +330,10 @@ def test_run_backups_continues_after_individual_errors_when_requested(
     assert "## 1. `local`" in manifest_content
     assert "## Failed Backups" not in manifest_content
     invalid_failure = (
-        "| `invalid` | Failed | - | MySQL SQL dump (gzip) | - | "
-        "`invalid DSN for local.invalid` |"
+        "| `invalid` | Failed | - | MySQL SQL dump (gzip) | - | `invalid DSN for local.invalid` |"
     )
     broken_failure = (
-        "| `broken` | Failed | - | MySQL SQL dump (gzip) | - | "
-        "`simulated dump failure` |"
+        "| `broken` | Failed | - | MySQL SQL dump (gzip) | - | `simulated dump failure` |"
     )
     assert invalid_failure in manifest_content
     assert broken_failure in manifest_content

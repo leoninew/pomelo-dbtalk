@@ -209,7 +209,7 @@ def test_management_dsn_resolution_is_strict_and_dialect_specific(
 
 @pytest.mark.parametrize("group", ["mysql", "postgres"])
 def test_database_management_help_exposes_no_transaction_options(group: str) -> None:
-    result = CliRunner().invoke(cli, [group, "database", "--help"])
+    result = CliRunner().invoke(cli, [group, "schema", "--help"])
 
     assert result.exit_code == 0, result.output
     assert {"create", "drop", "list"} <= set(result.output.split())
@@ -223,7 +223,7 @@ def test_mysql_list_command_renders_database_names(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(mysql_database, "list_databases", lambda _: ("app", "system"))
 
     result = CliRunner().invoke(
-        cli, ["mysql", "database", "list", "--dsn-env", "MYSQL_MANAGEMENT_DSN"]
+        cli, ["mysql", "schema", "list", "--dsn-env", "MYSQL_MANAGEMENT_DSN"]
     )
 
     assert result.exit_code == 0, result.output
@@ -245,13 +245,13 @@ def test_postgresql_create_and_drop_commands_report_actions(
 
     create = runner.invoke(
         cli,
-        ["postgres", "database", "create", "--dsn-env", "POSTGRES_MANAGEMENT_DSN", "--name", "app"],
+        ["postgres", "schema", "create", "--dsn-env", "POSTGRES_MANAGEMENT_DSN", "--name", "app"],
     )
     drop = runner.invoke(
         cli,
         [
             "postgres",
-            "database",
+            "schema",
             "drop",
             "--dsn-env",
             "POSTGRES_MANAGEMENT_DSN",
@@ -277,7 +277,7 @@ def test_drop_requires_yes_before_resolving_a_dsn(monkeypatch: pytest.MonkeyPatc
         cli,
         [
             "mysql",
-            "database",
+            "schema",
             "drop",
             "--dsn",
             "mysql+pymysql://admin:secret@db.example/mysql",
@@ -301,7 +301,7 @@ def test_mysql_cli_errors_hide_dsn_password(monkeypatch: pytest.MonkeyPatch) -> 
 
     result = CliRunner().invoke(
         cli,
-        ["mysql", "database", "list", "--dsn", "mysql+pymysql://admin:secret@db.example/mysql"],
+        ["mysql", "schema", "list", "--dsn", "mysql+pymysql://admin:secret@db.example/mysql"],
     )
 
     assert result.exit_code != 0

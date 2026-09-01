@@ -1,4 +1,4 @@
-"""MySQL account lifecycle and database-profile authorization commands."""
+"""MySQL account lifecycle and profile/privilege authorization commands."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from dbtalk.database.dsn import ParsedDsn, dsn_from_environment, parse_dsn
 from dbtalk.database.models import DatabaseOperationError
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
-Profile = Literal["read-only", "read-write"]
+Profile = Literal["read-only", "ddl", "read-write", "dml"]
 _USER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.$-]{0,31}$")
 _HOST_PATTERN = re.compile(
     r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$"
@@ -179,12 +179,24 @@ def drop_command(
 @click.option("--dsn-env", help="Environment variable containing the MySQL DSN.")
 @click.option("--user", "user_name", required=True, help="MySQL account name.")
 @click.option("--host", required=True, help="Exact MySQL account host.")
-@click.option("--database", "database_name", required=True, help="Database authorization target.")
+@click.option(
+    "--database",
+    "database_name",
+    help="Database authorization target. Defaults to the DSN database.",
+)
 @click.option(
     "--profile",
-    type=click.Choice(("read-only", "read-write"), case_sensitive=True),
-    required=True,
-    help="Fixed authorization profile.",
+    type=click.Choice(("read-only", "ddl", "read-write", "dml"), case_sensitive=True),
+    help="Fixed authorization profile. Mutually exclusive with --privilege.",
+)
+@click.option(
+    "--privilege",
+    "privileges",
+    multiple=True,
+    help=(
+        "One native privilege name. Repeat for multiple privileges; mutually exclusive "
+        "with --profile."
+    ),
 )
 @click.option("--yes", is_flag=True, help="Confirm granting privileges.")
 def grant_command(
@@ -192,25 +204,30 @@ def grant_command(
     dsn_env: str | None,
     user_name: str,
     host: str,
-    database_name: str,
-    profile: str,
+    database_name: str | None,
+    profile: str | None,
+    privileges: tuple[str, ...],
     yes: bool,
 ) -> None:
-    """Grant one fixed MySQL database profile."""
+    """Grant one MySQL profile or native privilege set."""
 
     _require_yes(yes, "grant MySQL privileges")
     try:
-        grant_profile(
-            resolve_management_dsn(dsn_value, dsn_env),
-            user_name,
-            host,
-            database_name,
-            _profile(profile),
-        )
+        parsed = resolve_management_dsn(dsn_value, dsn_env)
+        if profile is not None and privileges:
+            raise DatabaseOperationError("--profile and --privilege are mutually exclusive")
+        if profile is None and not privileges:
+            raise DatabaseOperationError("provide --profile or at least one --privilege")
+        if profile is not None:
+            grant_profile(parsed, user_name, host, database_name, _profile(profile))
+        else:
+            grant_privileges(parsed, user_name, host, database_name, privileges)
     except DatabaseOperationError as error:
         raise click.ClickException(str(error)) from error
     account = _display_account(user_name, host)
-    click.echo(f"MySQL profile granted: {profile} on {database_name} to {account}")
+    target = database_name or parsed.database or "DSN database"
+    detail = f"profile {profile}" if profile is not None else f"privileges {', '.join(privileges)}"
+    click.echo(f"MySQL {detail} granted on {target} to {account}")
 
 
 @click.command("revoke", context_settings=CONTEXT_SETTINGS)
@@ -218,12 +235,24 @@ def grant_command(
 @click.option("--dsn-env", help="Environment variable containing the MySQL DSN.")
 @click.option("--user", "user_name", required=True, help="MySQL account name.")
 @click.option("--host", required=True, help="Exact MySQL account host.")
-@click.option("--database", "database_name", required=True, help="Database authorization target.")
+@click.option(
+    "--database",
+    "database_name",
+    help="Database authorization target. Defaults to the DSN database.",
+)
 @click.option(
     "--profile",
-    type=click.Choice(("read-only", "read-write"), case_sensitive=True),
-    required=True,
-    help="Fixed authorization profile.",
+    type=click.Choice(("read-only", "ddl", "read-write", "dml"), case_sensitive=True),
+    help="Fixed authorization profile. Mutually exclusive with --privilege.",
+)
+@click.option(
+    "--privilege",
+    "privileges",
+    multiple=True,
+    help=(
+        "One native privilege name. Repeat for multiple privileges; mutually exclusive "
+        "with --profile."
+    ),
 )
 @click.option("--yes", is_flag=True, help="Confirm revoking privileges.")
 def revoke_command(
@@ -231,25 +260,30 @@ def revoke_command(
     dsn_env: str | None,
     user_name: str,
     host: str,
-    database_name: str,
-    profile: str,
+    database_name: str | None,
+    profile: str | None,
+    privileges: tuple[str, ...],
     yes: bool,
 ) -> None:
-    """Revoke one fixed MySQL database profile."""
+    """Revoke one MySQL profile or native privilege set."""
 
     _require_yes(yes, "revoke MySQL privileges")
     try:
-        revoke_profile(
-            resolve_management_dsn(dsn_value, dsn_env),
-            user_name,
-            host,
-            database_name,
-            _profile(profile),
-        )
+        parsed = resolve_management_dsn(dsn_value, dsn_env)
+        if profile is not None and privileges:
+            raise DatabaseOperationError("--profile and --privilege are mutually exclusive")
+        if profile is None and not privileges:
+            raise DatabaseOperationError("provide --profile or at least one --privilege")
+        if profile is not None:
+            revoke_profile(parsed, user_name, host, database_name, _profile(profile))
+        else:
+            revoke_privileges(parsed, user_name, host, database_name, privileges)
     except DatabaseOperationError as error:
         raise click.ClickException(str(error)) from error
     account = _display_account(user_name, host)
-    click.echo(f"MySQL profile revoked: {profile} on {database_name} from {account}")
+    target = database_name or parsed.database or "DSN database"
+    detail = f"profile {profile}" if profile is not None else f"privileges {', '.join(privileges)}"
+    click.echo(f"MySQL {detail} revoked on {target} from {account}")
 
 
 def resolve_management_dsn(dsn: str | None, environment_name: str | None) -> ParsedDsn:
@@ -339,10 +373,10 @@ def grant_profile(
     parsed: ParsedDsn,
     user_name: str,
     host: str,
-    database_name: str,
+    database_name: str | None,
     profile: Profile,
 ) -> None:
-    """Grant one fixed MySQL database profile to an account."""
+    """Grant one fixed MySQL profile to an account."""
 
     _change_profile(parsed, user_name, host, database_name, profile, action="GRANT")
 
@@ -351,12 +385,63 @@ def revoke_profile(
     parsed: ParsedDsn,
     user_name: str,
     host: str,
-    database_name: str,
+    database_name: str | None,
     profile: Profile,
 ) -> None:
-    """Revoke one fixed MySQL database profile from an account."""
+    """Revoke one fixed MySQL profile from an account."""
 
     _change_profile(parsed, user_name, host, database_name, profile, action="REVOKE")
+
+
+def grant_privileges(
+    parsed: ParsedDsn,
+    user_name: str,
+    host: str,
+    database_name: str | None,
+    privileges: tuple[str, ...],
+) -> None:
+    _change_privileges(parsed, user_name, host, database_name, privileges, action="GRANT")
+
+
+def revoke_privileges(
+    parsed: ParsedDsn,
+    user_name: str,
+    host: str,
+    database_name: str | None,
+    privileges: tuple[str, ...],
+) -> None:
+    _change_privileges(parsed, user_name, host, database_name, privileges, action="REVOKE")
+
+
+def _change_privileges(
+    parsed: ParsedDsn,
+    user_name: str,
+    host: str,
+    database_name: str | None,
+    privileges: tuple[str, ...],
+    *,
+    action: Literal["GRANT", "REVOKE"],
+) -> None:
+    _validate_management_dsn(parsed)
+    _validate_account(user_name, host)
+    target_database = database_name or parsed.database
+    if target_database is None:
+        raise DatabaseOperationError("database name is required when the DSN has no database")
+    _validate_resource_name(target_database, "database name")
+    if not privileges:
+        raise DatabaseOperationError("at least one privilege is required")
+    normalized = tuple(_normalize_privilege(value) for value in privileges)
+
+    def operation(connection: Connection) -> None:
+        _reject_current_account(connection, user_name, host)
+        quoted_database = connection.dialect.identifier_preparer.quote(target_database)
+        direction = "TO" if action == "GRANT" else "FROM"
+        statement = (
+            f"{action} {', '.join(normalized)} ON {quoted_database}.* {direction} :user@:host"
+        )
+        connection.execute(text(statement), {"user": user_name, "host": host})
+
+    _run_management_operation(parsed, operation)
 
 
 def _alter_user(parsed: ParsedDsn, user_name: str, host: str, action: str) -> None:
@@ -376,22 +461,30 @@ def _change_profile(
     parsed: ParsedDsn,
     user_name: str,
     host: str,
-    database_name: str,
+    database_name: str | None,
     profile: Profile,
     *,
     action: Literal["GRANT", "REVOKE"],
 ) -> None:
     _validate_management_dsn(parsed)
     _validate_account(user_name, host)
-    _validate_resource_name(database_name, "database name")
+    profile = _profile(profile)
+    target_database = database_name or parsed.database
+    if target_database is None:
+        raise DatabaseOperationError("database name is required when the DSN has no database")
+    _validate_resource_name(target_database, "database name")
     privileges = _profile_privileges(profile)
 
     def operation(connection: Connection) -> None:
         _reject_current_account(connection, user_name, host)
-        quoted_database = connection.dialect.identifier_preparer.quote(database_name)
+        quoted_database = connection.dialect.identifier_preparer.quote(target_database)
         statement = f"{action} {privileges} ON {quoted_database}.* "
         statement += "TO :user@:host" if action == "GRANT" else "FROM :user@:host"
         connection.execute(text(statement), {"user": user_name, "host": host})
+        if profile == "dml":
+            global_statement = f"{action} CREATE ON *.* "
+            global_statement += "TO :user@:host" if action == "GRANT" else "FROM :user@:host"
+            connection.execute(text(global_statement), {"user": user_name, "host": host})
 
     _run_management_operation(parsed, operation)
 
@@ -470,19 +563,35 @@ def _reject_current_account(connection: Connection, user_name: str, host: str) -
 
 
 def _profile(profile: str) -> Profile:
-    if profile == "read-only":
-        return "read-only"
-    if profile == "read-write":
-        return "read-write"
+    if profile in {"read-only", "ddl", "read-write", "dml"}:
+        return profile  # type: ignore[return-value]
     raise DatabaseOperationError("authorization profile is invalid")
 
 
 def _profile_privileges(profile: Profile) -> str:
     profiles = {
         "read-only": "SELECT, SHOW VIEW",
-        "read-write": "SELECT, SHOW VIEW, INSERT, UPDATE, DELETE",
+        "ddl": "SELECT, SHOW VIEW, CREATE, ALTER, DROP, INDEX, CREATE VIEW, TRIGGER",
+        "read-write": (
+            "SELECT, SHOW VIEW, CREATE, ALTER, DROP, INDEX, CREATE VIEW, TRIGGER, "
+            "INSERT, UPDATE, DELETE"
+        ),
+        "dml": (
+            "SELECT, SHOW VIEW, CREATE, ALTER, DROP, INDEX, CREATE VIEW, TRIGGER, "
+            "INSERT, UPDATE, DELETE"
+        ),
     }
     return profiles[profile]
+
+
+def _normalize_privilege(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or value != value.strip()
+        or not re.fullmatch(r"[A-Za-z][A-Za-z0-9 _]*", value)
+    ):
+        raise DatabaseOperationError("privilege name is invalid")
+    return value.upper()
 
 
 def _require_yes(yes: bool, action: str) -> None:
@@ -507,10 +616,12 @@ __all__ = [
     "drop_user",
     "enable_user",
     "grant_command",
+    "grant_privileges",
     "grant_profile",
     "list_users",
     "resolve_management_dsn",
     "revoke_command",
+    "revoke_privileges",
     "revoke_profile",
     "rotate_user_password",
     "user",

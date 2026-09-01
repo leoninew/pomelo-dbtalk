@@ -4,10 +4,21 @@
 
 ```powershell
 uv run dbtalk mysql --help
-uv run dbtalk mysql database --help
+uv run dbtalk mysql schema --help
 uv run dbtalk mysql dump --help
 uv run dbtalk mysql restore --help
+uv run dbtalk mysql permissions --help
 ```
+
+## 命令概览
+
+| 命令 | 用途 |
+| --- | --- |
+| `schema list/create/drop` | 查看、创建或删除 MySQL schema/database。 |
+| `user list/create/enable/disable/rotate-password/drop` | 管理账号生命周期，不授予业务权限。 |
+| `grant` / `revoke` | 按 profile 或原生 `--privilege` 授予、撤销权限。 |
+| `permissions list/show` | 查看当前 DSN 可见的原生授权，可按主体和 database 筛选。 |
+| `dump` / `restore` | 创建或恢复原生 SQL dump。 |
 
 ## DSN
 
@@ -26,16 +37,16 @@ uv run dbtalk mysql restore `
 
 `mysql://`、`postgresql://`、`postgres://`、Go 风格 DSN 和 host/user/password/database 分散参数都不是 canonical DSN。完整 DSN 可能包含密码；脚本中优先使用 `--dsn-env`。密码只通过 `MYSQL_PWD` 传递给原生客户端，正常输出不会回显密码。
 
-## Database management
+## Schema management
 
-`database` 子命令只管理 MySQL 数据库本身，不执行任意 SQL、不管理账号，也不替代 dump/restore。DSN 必须指向实例中一个已存在且可连接的管理库，所用账号需要相应的 MySQL 数据库管理权限。
+`schema` 子命令管理 MySQL schema/database 本身，不执行任意 SQL、不管理账号，也不替代 dump/restore。DSN 必须指向实例中一个已存在且可连接的管理库，所用账号需要相应的 MySQL 数据库管理权限。
 
 ```powershell
 $env:MYSQL_MANAGEMENT_DSN = 'mysql+pymysql://operator:password@db.example.com:3306/mysql'
 
-uv run dbtalk mysql database list --dsn-env MYSQL_MANAGEMENT_DSN
-uv run dbtalk mysql database create --dsn-env MYSQL_MANAGEMENT_DSN --name app_db
-uv run dbtalk mysql database drop --dsn-env MYSQL_MANAGEMENT_DSN --name app_db --yes
+uv run dbtalk mysql schema list --dsn-env MYSQL_MANAGEMENT_DSN
+uv run dbtalk mysql schema create --dsn-env MYSQL_MANAGEMENT_DSN --name app_db
+uv run dbtalk mysql schema drop --dsn-env MYSQL_MANAGEMENT_DSN --name app_db --yes
 ```
 
 `list` 输出可见数据库名。`create` 使用服务端默认创建属性。`drop` 是不可逆操作，必须显式提供 `--yes`；失败时命令只报告动作失败，不会输出 DSN 密码。MySQL 的名称、权限和 DDL 行为由服务器决定，执行前确认目标名称和连接账号。
@@ -76,7 +87,7 @@ uv run dbtalk mysql restore `
 | `--database TARGET` | 已存在的恢复目标库。优先于 `mysqlrestore.database` 和 DSN database。 |
 | `--input FILE` | 必填的 SQL 或 gzip 压缩 SQL 输入文件。 |
 
-目标库必须在 restore 前由独立的 `dbtalk mysql database create` 或其他明确流程创建。restore 会先检查目标库存在，再拒绝输入中的 `CREATE DATABASE` 或 `DROP DATABASE`，并只将顶层 `USE` 重写为目标库；不会修改原始输入文件。restore 可能覆盖或删除现有数据，执行前确认目标连接、输入来源和写入授权。
+目标库必须在 restore 前由独立的 `dbtalk mysql schema create` 或其他明确流程创建。restore 会先检查目标库存在，再拒绝输入中的 `CREATE DATABASE` 或 `DROP DATABASE`，并只将顶层 `USE` 重写为目标库；不会修改原始输入文件。restore 可能覆盖或删除现有数据，执行前确认目标连接、输入来源和写入授权。
 
 dump 和 restore 会在 stderr 输出 `started`、`progress`、`completed` 和 `failed` 生命周期日志，包含阶段、耗时和可测量字节数；stdout 只输出最终路径或结果摘要。日志和错误不会输出密码、完整含密码 DSN 或 SQL 内容。
 
@@ -96,10 +107,22 @@ uv run dbtalk mysql user create --dsn-env MYSQL_ADMIN_DSN `
   --user app_user --host app.example --password-env APP_PASSWORD
 uv run dbtalk mysql grant --dsn-env MYSQL_ADMIN_DSN `
   --user app_user --host app.example --database app --profile read-write --yes
+
+uv run dbtalk mysql grant --dsn-env MYSQL_ADMIN_DSN `
+  --user app_user --host app.example --privilege SELECT `
+  --privilege UPDATE --yes
 ```
 
 MySQL user 必须显式提供一个精确 host：`localhost`、单个 DNS 名称、IPv4 或 IPv6。`%`、`_` 和其他通配 host 均被拒绝。密码只能通过 `--password-env` 引用的环境变量输入；不会显示在命令输出、日志或错误中。
 
-授权只支持单个数据库及固定 profile：`read-only` 授予 `SELECT, SHOW VIEW`，`read-write` 额外授予 `INSERT, UPDATE, DELETE`。不支持全局、表级、列级、任意 privilege 文本或 `WITH GRANT OPTION`。
+授权目标 database 可省略，省略时使用 DSN database。profile 按 `dml > read-write > ddl > read-only` 包含：`read-only` 授予 `SELECT, SHOW VIEW`，`ddl` 增加建表/改表等 DDL，`read-write` 再增加 `INSERT, UPDATE, DELETE`，`dml` 再增加建库所需权限。也可重复指定 `--privilege NAME` 使用数据库服务端支持的细粒度权限；它与 `--profile` 互斥。
+
+```powershell
+uv run dbtalk mysql permissions list --dsn-env MYSQL_ADMIN_DSN
+uv run dbtalk mysql permissions show --dsn-env MYSQL_ADMIN_DSN --user app_user --host app.example
+```
+
+`permissions list` 默认展示当前 DSN 可见的原生权限，可按账号和 database 筛选；`show` 查看一个精确的
+`user@host`。输出直接来自 MySQL 原生权限查询。不支持 `WITH GRANT OPTION`、代理身份或超级用户管理。
 
 启用、禁用、轮换密码、删除、授权和撤销都要求 `--yes`，并拒绝修改当前管理 account。创建和授权不会隐式赋予其他权限；撤销 profile 可能中断使用该 account 的应用连接。

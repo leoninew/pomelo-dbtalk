@@ -1,15 +1,15 @@
 # 数据库操作手册
 
-`dbtalk database` 提供通用 SQL `query`/`exec`，并用 JSONL 在既有 SQLite、MySQL 与 PostgreSQL schema
+`dbtalk query`、`dbtalk exec` 提供通用 SQL，`dbtalk export`、`dbtalk import` 用 JSONL 在既有 SQLite、MySQL 与 PostgreSQL schema
 之间传输表数据。所有连接入口都使用一个明确的 SQLAlchemy 2.x DSN：命令接受二选一的 `--dsn DSN`
 或 `--dsn-env NAME`，Python API 接受 DSN 字符串或环境变量名。不会根据数据库类型猜测 driver。
 
 ```powershell
-uv run dbtalk database --help
-uv run dbtalk database export --help
-uv run dbtalk database import --help
-uv run dbtalk database query --help
-uv run dbtalk database exec --help
+uv run dbtalk --help
+uv run dbtalk export --help
+uv run dbtalk import --help
+uv run dbtalk query --help
+uv run dbtalk exec --help
 ```
 
 ## DSN 约定
@@ -34,20 +34,20 @@ SQL 使用 SQLAlchemy named bind 参数。参数格式为可重复的 `NAME=JSON
 `database.operation_timeout_seconds`（默认 `30`）。超时仅针对当前单条语句。
 
 ```powershell
-uv run dbtalk database query `
+uv run dbtalk query `
   --dsn 'sqlite:///./data/app.db' `
   --sql 'SELECT id, name FROM users WHERE id = :id' `
   --param id=1 `
   --format table
 
 $env:APP_DSN = 'sqlite:///./data/app.db'
-uv run dbtalk database query `
+uv run dbtalk query `
   --dsn-env APP_DSN `
   --sql 'SELECT id, name FROM users WHERE id = :id' `
   --param id=1 `
   --format json
 
-uv run dbtalk database exec `
+uv run dbtalk exec `
   --write `
   --dsn-env APP_DSN `
   --sql 'UPDATE users SET name = :name WHERE id = :id' `
@@ -85,7 +85,7 @@ $env:DBTALK_DATABASE__OPERATION_TIMEOUT_SECONDS = '15'
 export 读取选定源 schema，将表元数据和行数据写入一个 JSONL 文件：
 
 ```powershell
-uv run dbtalk database export `
+uv run dbtalk export `
   --source sqlite `
   --dsn 'sqlite:///./source.db' `
   --output .\data\transfer.jsonl `
@@ -93,7 +93,7 @@ uv run dbtalk database export `
   --exclude-table audit_log
 
 $env:SOURCE_PG_DSN = 'postgresql+psycopg://user:password@host:5432/source_db'
-uv run dbtalk database export `
+uv run dbtalk export `
   --source postgresql `
   --dsn-env SOURCE_PG_DSN `
   --output .\data\transfer.jsonl
@@ -121,14 +121,14 @@ uv run dbtalk database export `
 import 将 JSONL 制品写入既有目标 schema：
 
 ```powershell
-uv run dbtalk database import `
+uv run dbtalk import `
   --target sqlite `
   --dsn 'sqlite:///./target.db' `
   --input .\data\transfer.jsonl `
   --mode upsert
 
 $env:TARGET_MYSQL_DSN = 'mysql+pymysql://user:password@host:3306/target_db'
-uv run dbtalk database import `
+uv run dbtalk import `
   --target mysql `
   --dsn-env TARGET_MYSQL_DSN `
   --input .\data\transfer.jsonl.gz `

@@ -6,10 +6,21 @@ custom archive，并可管理 PostgreSQL 数据库本身。它不提供物理备
 
 ```powershell
 uv run dbtalk postgres --help
-uv run dbtalk postgres database --help
+uv run dbtalk postgres schema --help
 uv run dbtalk postgres dump --help
 uv run dbtalk postgres restore --help
+uv run dbtalk postgres permissions --help
 ```
+
+## 命令概览
+
+| 命令 | 用途 |
+| --- | --- |
+| `schema list/create/drop` | 查看、创建或删除 PostgreSQL schema/database。 |
+| `role list/create/enable/disable/rotate-password/drop` | 管理 role 生命周期，不授予业务权限。 |
+| `grant` / `revoke` | 按 profile 或原生 `--privilege` 授予、撤销 database/schema 权限。 |
+| `permissions list/show` | 查看当前 DSN 可见的原生授权，可按 role、database、schema 筛选。 |
+| `dump` / `restore` | 创建或恢复单库 custom archive。 |
 
 ## DSN 与客户端
 
@@ -40,17 +51,17 @@ postgres:
 tag。PostgreSQL 18+ 是当前支持基线；`pg_dump` client 必须不低于源服务端 major，恢复目标通常不应低于
 备份来源。
 
-## Database management
+## Schema management
 
-`database` 子命令只管理 PostgreSQL database，不执行任意 SQL、不管理 role，也不替代 dump/restore。管理
+`schema` 子命令管理 PostgreSQL schema/database，不执行任意 SQL、不管理 role，也不替代 dump/restore。管理
 DSN 必须连接到目标以外的维护库，通常为 `postgres`；账号还需要相应的建库或删库权限。
 
 ```powershell
 $env:POSTGRES_MANAGEMENT_DSN = 'postgresql+psycopg://operator:password@db.example.com:5432/postgres'
 
-uv run dbtalk postgres database list --dsn-env POSTGRES_MANAGEMENT_DSN
-uv run dbtalk postgres database create --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db
-uv run dbtalk postgres database drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --yes
+uv run dbtalk postgres schema list --dsn-env POSTGRES_MANAGEMENT_DSN
+uv run dbtalk postgres schema create --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db
+uv run dbtalk postgres schema drop --dsn-env POSTGRES_MANAGEMENT_DSN --name app_db --yes
 ```
 
 `list` 输出非模板、可连接的数据库。`create` 使用服务端默认创建属性。`drop` 是不可逆操作，必须显式提供
@@ -114,16 +125,29 @@ uv run dbtalk postgres role create --dsn-env POSTGRES_ADMIN_DSN `
   --role app_role --password-env APP_PASSWORD
 uv run dbtalk postgres grant --dsn-env POSTGRES_ADMIN_DSN `
   --role app_role --schema app --profile read-write --yes
+
+uv run dbtalk postgres grant --dsn-env POSTGRES_ADMIN_DSN `
+  --role app_role --schema app --privilege USAGE `
+  --privilege CREATE --yes
 ```
 
 新 role 默认是 `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`。密码只能通过
 `--password-env` 引用的环境变量输入；不会显示在命令输出、日志或错误中。
 
-授权目标仅支持 database 或 schema。`read-only` database profile 授予 `CONNECT`；`read-write` 额外授予
-`TEMPORARY`。schema 的 `read-only` profile 授予 `USAGE` 和当前所有表的 `SELECT`；`read-write` 额外授予
-当前所有表的 `INSERT, UPDATE, DELETE`，以及当前序列的 `USAGE, SELECT, UPDATE`。命令不会修改 default
+授权目标支持 database 或 schema，未指定时使用 DSN database。profile 按 `dml > read-write > ddl > read-only`
+包含：`read-only` 提供基础只读权限；`ddl` 增加 schema/object DDL；`read-write` 再增加常规 DML；`dml` 再增加
+数据库原生建库能力（通常映射为 role 的 `CREATEDB`），而 `read-write` 不包含该能力。也可重复指定
+`--privilege NAME` 使用数据库服务端支持的细粒度权限；它与 `--profile` 互斥。schema profile 不修改 default
 privileges，因此不会自动覆盖未来创建的表或序列。
 
-不支持独立 table、sequence、function 目标、DDL 权限、role membership、`WITH GRANT OPTION` 或任意
-privilege 文本。启用、禁用、轮换密码、删除、授权和撤销都要求 `--yes`，并拒绝修改当前管理 role；撤销
-profile 可能中断应用访问。
+```powershell
+uv run dbtalk postgres permissions list --dsn-env POSTGRES_ADMIN_DSN
+uv run dbtalk postgres permissions show --dsn-env POSTGRES_ADMIN_DSN --role app_role
+```
+
+`permissions list` 默认展示当前 DSN 可见的原生权限，可按 role、database、schema 筛选；`show` 查看一个 role，
+资源筛选可选。输出直接来自 PostgreSQL 原生权限查询。
+
+不支持把 table、sequence、function 作为独立资源参数，也不支持 role membership、`WITH GRANT OPTION`
+或完整 SQL 文本；细粒度 privilege 仅作为数据库服务端校验的名称传入。启用、禁用、轮换密码、删除、
+授权和撤销都要求 `--yes`，并拒绝修改当前管理 role；撤销 profile 可能中断应用访问。

@@ -151,7 +151,7 @@ def resolve_export_output(
 
 @click.group("database", context_settings=CONTEXT_SETTINGS)
 def database() -> None:
-    """Run generic database operations and transfer table data through JSONL."""
+    """Internal command group for generic database operations and JSONL transfer."""
 
 
 @database.command("export", context_settings=CONTEXT_SETTINGS)

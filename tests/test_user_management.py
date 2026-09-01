@@ -136,7 +136,8 @@ def test_mysql_profile_quotes_database_and_protects_current_identity(
 
     assert connection.statements[0] == "SELECT CURRENT_USER()"
     assert connection.statements[1] == (
-        'GRANT SELECT, SHOW VIEW, INSERT, UPDATE, DELETE ON `app "quoted"`.* TO :user@:host'
+        "GRANT SELECT, SHOW VIEW, CREATE, ALTER, DROP, INDEX, CREATE VIEW, TRIGGER, "
+        'INSERT, UPDATE, DELETE ON `app "quoted"`.* TO :user@:host'
     )
     assert connection.parameters == [{"user": "app_user", "host": "app.example"}]
 
@@ -278,9 +279,44 @@ def test_postgresql_schema_read_write_profile_targets_existing_objects(
     assert connection.statements == [
         "SELECT CURRENT_USER",
         "GRANT USAGE ON SCHEMA app TO app_role",
+        "GRANT CREATE ON SCHEMA app TO app_role",
         "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO app_role",
         "GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA app TO app_role",
     ]
+
+
+@pytest.mark.parametrize(
+    ("profile", "expected"),
+    [
+        ("read-only", "GRANT SELECT, SHOW VIEW ON app.* TO :user@:host"),
+        (
+            "ddl",
+            "GRANT SELECT, SHOW VIEW, CREATE, ALTER, DROP, INDEX, CREATE VIEW, TRIGGER "
+            "ON app.* TO :user@:host",
+        ),
+        (
+            "read-write",
+            "GRANT SELECT, SHOW VIEW, CREATE, ALTER, DROP, INDEX, CREATE VIEW, TRIGGER, "
+            "INSERT, UPDATE, DELETE ON app.* TO :user@:host",
+        ),
+        (
+            "dml",
+            "GRANT SELECT, SHOW VIEW, CREATE, ALTER, DROP, INDEX, CREATE VIEW, TRIGGER, "
+            "INSERT, UPDATE, DELETE ON app.* TO :user@:host",
+        ),
+    ],
+)
+def test_mysql_profiles_follow_hierarchy(
+    monkeypatch: pytest.MonkeyPatch, profile: str, expected: str
+) -> None:
+    connection = FakeConnection(MysqlDialect(), current_identity="admin@localhost")
+    monkeypatch.setattr(mysql_user, "create_engine", lambda _: FakeEngine(connection))
+
+    mysql_user.grant_profile(mysql_dsn(), "app_user", "app.example", "app", profile)  # type: ignore[arg-type]
+
+    assert connection.statements[1] == expected
+    if profile == "dml":
+        assert connection.statements[2] == "GRANT CREATE ON *.* TO :user@:host"
 
 
 def test_postgresql_database_profile_and_current_role_protection(
@@ -293,7 +329,7 @@ def test_postgresql_database_profile_and_current_role_protection(
 
     assert connection.statements == [
         "SELECT CURRENT_USER",
-        "REVOKE CONNECT, TEMPORARY ON DATABASE app FROM app_role",
+        "REVOKE CONNECT, CREATE, TEMPORARY ON DATABASE app FROM app_role",
     ]
 
     protected_connection = FakeConnection(PostgreSQLDialect(), current_identity="admin")
@@ -310,8 +346,8 @@ def test_postgresql_database_profile_and_current_role_protection(
 
 
 def test_postgresql_resource_validation_and_list_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(DatabaseOperationError, match="exactly one"):
-        postgres_role._resource("app", "public")
+    with pytest.raises(DatabaseOperationError, match="at most one"):
+        postgres_role._resource("app", "public", postgresql_dsn())
 
     connection = FakeConnection(PostgreSQLDialect(), rows=[("app_role", True, False, False)])
     monkeypatch.setattr(postgres_role, "create_engine", lambda _: FakeEngine(connection))
@@ -323,6 +359,60 @@ def test_postgresql_resource_validation_and_list_fields(monkeypatch: pytest.Monk
         "SELECT rolname, rolcanlogin, rolcreatedb, rolcreaterole FROM pg_roles ORDER BY rolname"
     ]
     assert "password" not in postgres_role._render_roles(roles).lower()
+
+
+def test_grant_privilege_modes_are_mutually_exclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = CliRunner().invoke(
+        cli,
+        [
+            "mysql",
+            "grant",
+            "--dsn",
+            "mysql+pymysql://admin:secret@db.example/app",
+            "--user",
+            "app_user",
+            "--host",
+            "app.example",
+            "--profile",
+            "read-only",
+            "--privilege",
+            "SELECT",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+    assert "secret" not in result.output
+
+
+def test_repeated_privileges_dispatch_and_default_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed = mysql_dsn()
+    grant = Mock()
+    monkeypatch.setattr(mysql_user, "resolve_management_dsn", lambda *_: parsed)
+    monkeypatch.setattr(mysql_user, "grant_privileges", grant)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "mysql",
+            "grant",
+            "--dsn-env",
+            "MYSQL_ADMIN_DSN",
+            "--user",
+            "app_user",
+            "--host",
+            "app.example",
+            "--privilege",
+            "SELECT",
+            "--privilege",
+            "UPDATE",
+            "--yes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    grant.assert_called_once_with(parsed, "app_user", "app.example", None, ("SELECT", "UPDATE"))
 
 
 def test_postgresql_high_risk_cli_requires_yes_without_exposing_dsn() -> None:
@@ -472,7 +562,13 @@ def test_mysql_direct_lifecycle_operations_and_validation_branches(
     with pytest.raises(DatabaseOperationError, match="user name"):
         mysql_user.disable_user(mysql_dsn(), "bad name", "localhost")
     with pytest.raises(DatabaseOperationError, match="database name"):
-        mysql_user.grant_profile(mysql_dsn(), "app_user", "localhost", "", "read-only")
+        mysql_user.grant_profile(
+            parse_dsn("mysql+pymysql://admin:secret@db.example"),
+            "app_user",
+            "localhost",
+            None,
+            "read-only",
+        )
     with pytest.raises(DatabaseOperationError, match="profile"):
         mysql_user._profile("admin")
 
